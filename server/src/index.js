@@ -155,6 +155,33 @@ io.on('connection', socket => {
     }
   });
 
+  // Change Game Speed
+  socket.on(EVENTS.CLIENT.CHANGE_SPEED, (data, callback) => {
+    const room = roomManager.getPlayerRoom(socket.id);
+    if (!room) {
+      if (typeof callback === 'function') callback({ success: false, reason: 'You are not in a room.' });
+      return;
+    }
+
+    const res = room.handleSpeedChange(socket.id, data);
+    if (!res.success) {
+      socket.emit(EVENTS.SERVER.ROOM_ERROR, { message: res.reason });
+    }
+    if (typeof callback === 'function') callback(res);
+  });
+
+  // Flag Toss request (authoritative coin flip to select flag holder)
+  socket.on(EVENTS.CLIENT.TOSS_FLAG, (callback) => {
+    const room = roomManager.getPlayerRoom(socket.id);
+    if (!room) {
+      if (typeof callback === 'function') callback({ success: false, reason: 'You are not in a room.' });
+      return;
+    }
+
+    const toss = room.performToss();
+    if (typeof callback === 'function') callback({ success: true, toss });
+  });
+
   // Player continuous input (dx, dy)
   socket.on(EVENTS.CLIENT.PLAYER_INPUT, input => {
     const room = roomManager.getPlayerRoom(socket.id);

@@ -3,7 +3,21 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { GameRoom } from '../src/gameRoom.js';
 import { RoomManager } from '../src/roomManager.js';
-import { ROOM_STATUS, SCORING_CONFIG, PLAYER_CONFIG } from '../../shared/constants.js';
+import {
+  ROOM_STATUS,
+  SCORING_CONFIG,
+  PLAYER_CONFIG,
+  PHYSICS_CONFIG,
+  PLATFORMS,
+  SPRINGS,
+  PHASE_CONFIG,
+  EVENTS,
+} from '../../shared/constants.js';
+import {
+  checkPlatformLanding,
+  checkSpringPadCollision,
+  resolveBoundaryCollision,
+} from '../src/physics.js';
 
 // Mock Socket.IO instance for headless testing
 function createMockIO() {
@@ -11,12 +25,21 @@ function createMockIO() {
   return {
     to: (roomCode) => ({
       emit: (event, payload) => {
-        emittedEvents.push({ roomCode, event, payload });
+        emittedEvents.push({ roomCode, event, payload, data: payload });
       },
     }),
     emittedEvents,
   };
 }
+
+// Allow test suite to exit cleanly without waiting for 120s timer intervals
+const origStartSimulation = GameRoom.prototype.startSimulation;
+GameRoom.prototype.startSimulation = function () {
+  origStartSimulation.call(this);
+  if (this.loopInterval?.unref) {
+    this.loopInterval.unref();
+  }
+};
 
 test('1. Room creation and joining', () => {
   const io = createMockIO();
@@ -251,7 +274,7 @@ test('10. Scoring over time (holder -2/s, non-holder +1/s)', () => {
   assert.equal(Math.round(p2.score), 101);
 });
 
-test('11. 5-second continuous hold bonus (+8 points)', () => {
+test('11. Removal of 5-second hold bonus (no hold bonus awarded)', () => {
   const io = createMockIO();
   const room = new GameRoom('ROOM1', 'p1', io);
   room.addPlayer('p1', 'Alice');
@@ -260,23 +283,15 @@ test('11. 5-second continuous hold bonus (+8 points)', () => {
 
   room.setFlagHolder('p1', 'test');
   const p1 = room.players.get('p1');
-  p1.score = 0;
+  p1.score = 50;
 
-  // Simulate 4.9 seconds of holding (no bonus yet)
-  room.updateScoring(4.9);
-  // Holder has lost 4.9 * 2 = 9.8 points
-  assert.equal(p1.score < 0, true);
-  const scoreBeforeBonus = p1.score;
+  // Simulate 10 seconds of uninterrupted holding
+  room.updateScoring(10.0);
 
-  // Simulate next 0.2 seconds (total 5.1s -> bonus awarded!)
-  room.updateScoring(0.2);
-  // Score should have gained +8 points (minus 0.2*2 = 0.4s deduction)
-  const expected = scoreBeforeBonus + 8 - (0.2 * 2);
-  assert.equal(Math.abs(p1.score - expected) < 0.01, true);
-
-  // If lost before 5 seconds, timer resets
-  room.setFlagHolder('p2', 'pass');
-  assert.equal(room.uninterruptedHoldTime, 0);
+  // Holder should strictly lose 10s * 2 pts/s = 20 pts (50 - 20 = 30)
+  // No +8 hold bonus should ever be awarded!
+  assert.equal(Math.round(p1.score), 30);
+  assert.equal(room.uninterruptedHoldTime, undefined);
 });
 
 test('12. End-of-round penalty applied exactly once (-40 points)', () => {
@@ -366,3 +381,277 @@ test('15. Anti-exploit: client input cannot forge scores or flag ownership', () 
   assert.equal(p2.score, 0);
   assert.equal(room.flagHolderId, 'p1');
 });
+
+test('16. Speed adjustment panel controls and server authority', () => {
+  const io = createMockIO();
+  const room = new GameRoom('ROOM1', 'host-1', io);
+  room.addPlayer('host-1', 'Alice');
+  room.addPlayer('guest-1', 'Bob');
+
+  const initialSpeed = room.baseSpeed;
+  assert.equal(initialSpeed, 440);
+
+  // Non-host attempts to change speed in multi-player room -> rejected
+  const guestRes = room.handleSpeedChange('guest-1', { delta: 40 });
+  assert.equal(guestRes.success, false);
+  assert.match(guestRes.reason, /host/i);
+  assert.equal(room.baseSpeed, initialSpeed);
+
+  // Host increases speed by +40 px/s
+  const hostIncRes = room.handleSpeedChange('host-1', { delta: 40 });
+  assert.equal(hostIncRes.success, true);
+  assert.equal(room.baseSpeed, 480);
+
+  // Host sets speed preset multiplier (1.6x)
+  const hostMultRes = room.handleSpeedChange('host-1', { multiplier: 1.6 });
+  assert.equal(hostMultRes.success, true);
+  assert.equal(room.speedMultiplier, 1.6);
+  assert.equal(room.effectiveSpeed, Math.round(440 * 1.6));
+
+  // Host decreases speed by -100 px/s (704 -> 604)
+  const hostDecRes = room.handleSpeedChange('host-1', { delta: -100 });
+  assert.equal(hostDecRes.success, true);
+  assert.equal(room.baseSpeed, 604);
+  assert.equal(room.speedMultiplier, Math.round((604 / 440) * 100) / 100);
+});
+
+test('17. Authoritative flag toss to select initial flag holder and award starting bonus', () => {
+  const io = createMockIO();
+  const room = new GameRoom('ROOM1', 'host-1', io);
+  room.addPlayer('host-1', 'Alice');
+  room.addPlayer('guest-1', 'Bob');
+
+  // Trigger performToss
+  const toss = room.performToss();
+  assert.ok(toss);
+  assert.ok(['host-1', 'guest-1'].includes(toss.winnerId));
+  assert.ok(['Alice', 'Bob'].includes(toss.winnerName));
+  assert.equal(toss.startingBonus, 30);
+  assert.equal(toss.candidates.length, 2);
+
+  // Check event emitted to room
+  const tossEvent = io.emittedEvents.find(e => e.event === EVENTS.SERVER.FLAG_TOSS);
+  assert.ok(tossEvent);
+  assert.equal(tossEvent.payload.winnerId, toss.winnerId);
+
+  // Start match - toss winner must receive flag and +30 starting bonus
+  room.startMatch();
+  assert.equal(room.flagHolderId, toss.winnerId);
+  const winnerPlayer = room.players.get(toss.winnerId);
+  assert.equal(winnerPlayer.score, 30);
+});
+
+test('18. Speed adjustment rejection during active gameplay (strict pre-game only)', () => {
+  const io = createMockIO();
+  const room = new GameRoom('ROOM1', 'host-1', io);
+  room.addPlayer('host-1', 'Alice');
+  room.addPlayer('guest-1', 'Bob');
+
+  // Start match -> status becomes PLAYING
+  room.startMatch();
+  assert.equal(room.status, ROOM_STATUS.PLAYING);
+
+  // Host attempts to change speed while match is active
+  const midMatchRes = room.handleSpeedChange('host-1', { delta: 40 });
+  assert.equal(midMatchRes.success, false);
+  assert.match(midMatchRes.reason, /lobby/i);
+
+  // Match ends -> status becomes ENDED
+  room.endMatch();
+  assert.equal(room.status, ROOM_STATUS.ENDED);
+
+  // Now settings can be adjusted again
+  const postMatchRes = room.handleSpeedChange('host-1', { delta: 40 });
+  assert.equal(postMatchRes.success, true);
+});
+
+test('19. Swept one-way platform collision and landing', () => {
+  const plat = { id: 'test_plat', x: 200, y: 600, width: 300, height: 20 };
+
+  // 1. Player falls through platform top surface (landing)
+  // prevFeet = 590 + 24 = 614 (above platTop + 8? No, platTop is 600, feet was at 598 -> prevY = 574)
+  const prevY = 574; // prevFeet = 574 + 24 = 598 (above 600)
+  const newY = 604;  // newFeet = 604 + 24 = 628 (crossed through 600)
+  const landed = checkPlatformLanding(prevY, newY, 350, 24, plat);
+  assert.equal(landed, true, 'Player falling from above should land on platform');
+
+  // 2. Player jumping up through platform from below (should NOT collide - one-way)
+  const jumpPrevY = 620; // prevFeet = 644 (beneath platform)
+  const jumpNewY = 580;  // newFeet = 604
+  const upwardCollision = checkPlatformLanding(jumpPrevY, jumpNewY, 350, 24, plat);
+  assert.equal(upwardCollision, false, 'Player moving upward should pass through one-way platform');
+
+  // 3. Player outside horizontal platform bounds
+  const outsideX = 550; // plat is 200 to 500
+  const outsideLanded = checkPlatformLanding(prevY, newY, outsideX, 24, plat);
+  assert.equal(outsideLanded, false, 'Player outside horizontal bounds should not land');
+});
+
+test('20. Gravity, jumping, and grounded state requirement', () => {
+  const io = createMockIO();
+  const room = new GameRoom('ROOM1', 'p1', io);
+  room.addPlayer('p1', 'Alice');
+  room.addPlayer('p2', 'Bob');
+  room.startMatch();
+
+  const p1 = room.players.get('p1');
+  p1.x = 400;
+  p1.y = 500;
+  p1.vy = 0;
+  p1.isGrounded = false;
+
+  // Mid-air jump attempt: cannot jump while airborne
+  p1.jumpRequested = true;
+  room.updatePlayerMovement(0.016);
+  assert.notEqual(p1.vy, PHYSICS_CONFIG.JUMP_VELOCITY, 'Cannot jump when not grounded');
+  assert.ok(p1.vy > 0, 'Gravity should accelerate player downward');
+
+  // Put player on ground floor
+  p1.y = 940 - PLAYER_CONFIG.RADIUS;
+  p1.vy = 0;
+  p1.isGrounded = true;
+  p1.jumpRequested = true;
+
+  // Update movement: jump impulse applied
+  room.updatePlayerMovement(0.016);
+  assert.equal(p1.isGrounded, false, 'Jumping should unground player');
+  assert.ok(p1.vy < 0, 'Vertical velocity should be negative (upward impulse)');
+});
+
+test('21. Spring pad impulse and anti-bounce cooldown', () => {
+  const spring = SPRINGS[0]; // Ground Left spring
+  assert.ok(spring);
+
+  // 1. Downward landing on spring pad
+  const prevY = spring.y - PLAYER_CONFIG.RADIUS - 4;
+  const newY = spring.y - PLAYER_CONFIG.RADIUS + 4;
+  const hitSpring = checkSpringPadCollision(prevY, newY, spring.x + 10, PLAYER_CONFIG.RADIUS, [spring]);
+  assert.equal(hitSpring?.id, spring.id);
+
+  // 2. Integration in room simulation
+  const io = createMockIO();
+  const room = new GameRoom('ROOM1', 'p1', io);
+  room.addPlayer('p1', 'Alice');
+  room.addPlayer('p2', 'Bob');
+  room.startMatch();
+
+  const p1 = room.players.get('p1');
+  p1.x = spring.x + spring.width / 2;
+  p1.y = spring.y - PLAYER_CONFIG.RADIUS - 2;
+  p1.vy = 200; // Falling downward
+  p1.springCooldown = 0;
+
+  room.updatePlayerMovement(0.016);
+
+  // Player launched by spring pad
+  assert.ok(p1.vy < -800, 'Player should be launched upward by spring impulse');
+  assert.ok(p1.springCooldown > 0, 'Spring cooldown must be set to prevent spam');
+
+  // Verify SPRING_TRIGGERED event was emitted
+  const springEvent = io.emittedEvents.find(e => e.event === EVENTS.SERVER.SPRING_TRIGGERED);
+  assert.ok(springEvent);
+  assert.equal(springEvent.payload.springId, spring.id);
+});
+
+test('22. Authoritative scoring phase scheduler generation', () => {
+  const io = createMockIO();
+  const room = new GameRoom('ROOM1', 'p1', io);
+  room.addPlayer('p1', 'Alice');
+  room.addPlayer('p2', 'Bob');
+
+  room.startMatch();
+
+  // Match duration is 120s: should schedule 2 or 3 dynamic phases
+  assert.ok(room.phaseSchedule.length >= 2, 'Should schedule at least 2 scoring phases');
+
+  for (let i = 0; i < room.phaseSchedule.length; i++) {
+    const phase = room.phaseSchedule[i];
+    assert.ok(phase.type);
+    assert.ok(phase.startTime > 0 && phase.startTime < 120);
+    assert.equal(phase.duration, PHASE_CONFIG.PHASE_DURATION);
+    assert.equal(phase.warningTime, phase.startTime + PHASE_CONFIG.WARNING_DURATION);
+  }
+});
+
+test('23. 5s Advance warning and scoring phase multipliers', () => {
+  const io = createMockIO();
+  const room = new GameRoom('ROOM1', 'p1', io);
+  room.addPlayer('p1', 'Alice');
+  room.addPlayer('p2', 'Bob');
+  room.startMatch();
+
+  const doublePassType = PHASE_CONFIG.TYPES.find(t => t.id === 'DOUBLE_PASS');
+  assert.ok(doublePassType);
+
+  // Set deterministic phase: startTime = 60s, duration = 12s, warningTime = 65s
+  room.phaseSchedule = [{
+    startTime: 60,
+    duration: 12,
+    warningTime: 65,
+    type: doublePassType,
+    warningEmitted: false,
+    started: false,
+    ended: false,
+  }];
+
+  // 1. timeRemaining = 65.0s -> 5-second warning broadcast
+  room.timeRemaining = 65.0;
+  room.updateScoringPhases();
+
+  const warningEvent = io.emittedEvents.find(e => e.event === EVENTS.SERVER.PHASE_WARNING);
+  assert.ok(warningEvent, '5-second warning must be broadcast');
+  assert.equal(warningEvent.payload.phaseId, 'DOUBLE_PASS');
+
+  // 2. timeRemaining = 60.0s -> phase starts
+  room.timeRemaining = 60.0;
+  room.updateScoringPhases();
+
+  const startEvent = io.emittedEvents.find(e => e.event === EVENTS.SERVER.PHASE_STARTED);
+  assert.ok(startEvent, 'Phase start event must be broadcast');
+  assert.equal(room.activePhase?.id, 'DOUBLE_PASS');
+
+  // 3. In Double Pass phase: pass bonus should be +10 instead of +5
+  room.setFlagHolder('p1', 'test');
+  const p1 = room.players.get('p1');
+  const p2 = room.players.get('p2');
+  p1.score = 50;
+  p2.score = 50;
+
+  p1.x = 500; p1.y = 500;
+  p2.x = 510; p2.y = 500;
+  room.updateCollisionsAndTransfers();
+
+  assert.equal(room.flagHolderId, 'p2');
+  assert.equal(p1.score, 60, 'Passer must receive +10 in Double Pass phase (5 * 2.0)');
+
+  // 4. timeRemaining = 47.9s (startTime 60 - duration 12 = 48) -> phase ends
+  room.timeRemaining = 47.9;
+  room.updateScoringPhases();
+  assert.equal(room.activePhase, null, 'Active phase should end cleanly');
+  const endEvent = io.emittedEvents.find(e => e.event === EVENTS.SERVER.PHASE_ENDED);
+  assert.ok(endEvent, 'Phase ended event must be broadcast');
+});
+
+test('24. Scoring phase cleanup on match completion and reset', () => {
+  const io = createMockIO();
+  const room = new GameRoom('ROOM1', 'p1', io);
+  room.addPlayer('p1', 'Alice');
+  room.addPlayer('p2', 'Bob');
+  room.startMatch();
+
+  // Set active phase
+  room.activePhase = { id: 'flag_frenzy' };
+
+  // Match ends
+  room.endMatch();
+  assert.equal(room.activePhase, null, 'Active phase must be cleared on match end');
+  assert.equal(room.phaseSchedule.length, 0, 'Scheduled phases must be cleared on match end');
+
+  // Return to lobby
+  room.handleReturnToLobby('p1');
+  assert.equal(room.status, ROOM_STATUS.LOBBY);
+  assert.equal(room.activePhase, null);
+  assert.equal(room.phaseSchedule.length, 0);
+});
+
+

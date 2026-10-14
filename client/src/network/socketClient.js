@@ -137,9 +137,27 @@ export class SocketClient {
     }
   }
 
-  sendInput(x, y) {
+  changeSpeed(speedData) {
+    return new Promise((resolve) => {
+      if (!this.socket?.connected) return resolve({ success: false, reason: 'Not connected' });
+      this.socket.emit(EVENTS.CLIENT.CHANGE_SPEED, speedData, (res) => {
+        resolve(res || { success: true });
+      });
+    });
+  }
+
+  tossFlag() {
+    return new Promise((resolve) => {
+      if (!this.socket?.connected) return resolve({ success: false, reason: 'Not connected' });
+      this.socket.emit(EVENTS.CLIENT.TOSS_FLAG, (res) => {
+        resolve(res || { success: true });
+      });
+    });
+  }
+
+  sendInput(x, y, jump = false, dropDown = false) {
     if (this.socket?.connected) {
-      this.socket.emit(EVENTS.CLIENT.PLAYER_INPUT, { x, y });
+      this.socket.emit(EVENTS.CLIENT.PLAYER_INPUT, { x, y, jump, dropDown });
     }
   }
 }

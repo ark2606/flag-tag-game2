@@ -71,40 +71,73 @@ class GameApp {
 
     this.network.on(EVENTS.SERVER.ROOM_CREATED, (data) => {
       this.currentRoomState = data.roomState;
+      if (this.currentRoomState) {
+        this.ui.updateSpeedDisplay(this.currentRoomState.effectiveSpeed || this.currentRoomState.baseSpeed, this.currentRoomState.speedMultiplier);
+        if (this.currentRoomState.timeRemaining) {
+          this.ui.updateHudTimer(this.currentRoomState.timeRemaining);
+        }
+      }
       this.ui.showScreen('lobby');
       this.ui.updateLobby(this.currentRoomState, this.myId);
     });
 
     this.network.on(EVENTS.SERVER.ROOM_JOINED, (data) => {
       this.currentRoomState = data.roomState;
+      if (this.currentRoomState) {
+        this.ui.updateSpeedDisplay(this.currentRoomState.effectiveSpeed || this.currentRoomState.baseSpeed, this.currentRoomState.speedMultiplier);
+        if (this.currentRoomState.timeRemaining) {
+          this.ui.updateHudTimer(this.currentRoomState.timeRemaining);
+        }
+      }
       this.ui.showScreen('lobby');
       this.ui.updateLobby(this.currentRoomState, this.myId);
     });
 
     this.network.on(EVENTS.SERVER.ROOM_STATE, (state) => {
       this.currentRoomState = state;
+      if (state.effectiveSpeed || state.baseSpeed) {
+        this.ui.updateSpeedDisplay(state.effectiveSpeed || state.baseSpeed, state.speedMultiplier);
+      }
 
       if (state.status === ROOM_STATUS.LOBBY) {
         this.ui.showScreen('lobby');
         this.ui.updateLobby(state, this.myId);
+        this.ui.unlockSettings();
       } else if (state.status === ROOM_STATUS.PLAYING) {
         this.ui.showScreen('game');
+        this.ui.lockSettings();
       }
+    });
+
+    this.network.on(EVENTS.SERVER.SPEED_UPDATED, (data) => {
+      this.ui.updateSpeedDisplay(data.effectiveSpeed || data.baseSpeed, data.speedMultiplier);
+      this.ui.showToast(`⚡ Match Speed: ${data.effectiveSpeed} px/s (${data.speedMultiplier}x)`, 'bonus');
+    });
+
+    this.network.on(EVENTS.SERVER.FLAG_TOSS, (tossData) => {
+      this.ui.showTossAnimation(tossData);
     });
 
     this.network.on(EVENTS.SERVER.COUNTDOWN_TICK, (data) => {
       this.ui.showScreen('game');
       this.ui.showCountdown(data.count);
+      // Lock settings once countdown begins
+      if (data.count === 3) {
+        this.ui.lockSettings();
+      }
     });
 
     this.network.on(EVENTS.SERVER.GAME_STARTED, () => {
       this.ui.showScreen('game');
       this.ui.showCountdown(0); // GO!
+      this.ui.lockSettings();
     });
 
     this.network.on(EVENTS.SERVER.GAME_ENDED, (data) => {
       const isHost = this.currentRoomState?.hostId === this.myId;
       this.ui.showResults(data, isHost);
+      this.ui.unlockSettings();
+      this.ui.hidePhaseActive();
     });
 
     this.network.on(EVENTS.SERVER.ROOM_ERROR, (err) => {
@@ -117,11 +150,25 @@ class GameApp {
   }
 
   setupUIHandlers() {
+    // Speed change requests from UI panel & lobby (Host only)
+    this.ui.onSpeedChangeRequest = async (changeData) => {
+      const res = await this.network.changeSpeed(changeData);
+      if (res && !res.success) {
+        this.ui.showToast(`⚠️ ${res.reason || 'Could not change speed'}`, 'error');
+      }
+    };
+
     // Create Room
     this.ui.createRoomBtn.addEventListener('click', async () => {
       const name = this.ui.getPlayerName();
       this.ui.createRoomBtn.disabled = true;
-      const res = await this.network.createRoom(name);
+
+      const customConfig = {
+        match: { ROUND_DURATION: this.ui.selectedTimer || 120 },
+        player: { BASE_SPEED: Math.round(440 * (this.ui.currentMult || 1.0)) },
+      };
+
+      const res = await this.network.createRoom(name, customConfig);
       this.ui.createRoomBtn.disabled = false;
       if (!res.success) {
         this.ui.showToast(`⚠️ ${res.reason || 'Could not create room'}`, 'error');
@@ -165,6 +212,8 @@ class GameApp {
     this.ui.resultsLobbyBtn.addEventListener('click', () => {
       this.network.returnToLobby();
       this.ui.showScreen('lobby');
+      this.ui.unlockSettings();
+      this.ui.hidePhaseActive();
     });
   }
 }

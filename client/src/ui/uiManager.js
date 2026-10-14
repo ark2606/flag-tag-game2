@@ -39,8 +39,45 @@ export class UIManager {
     this.resultsLobbyBtn = document.getElementById('results-lobby-btn');
 
     // Top Bar elements
+    this.topScorecardBar = document.getElementById('top-scorecard-bar');
     this.pingText = document.getElementById('ping-text');
     this.soundToggleBtn = document.getElementById('sound-toggle-btn');
+    this.volumeSlider = document.getElementById('volume-slider');
+
+    // Speed Panel elements
+    this.speedControlPanel = document.getElementById('speed-control-panel');
+    this.speedValue = document.getElementById('speed-value');
+    this.speedMult = document.getElementById('speed-mult');
+    this.speedIncBtn = document.getElementById('speed-inc-btn');
+    this.speedDecBtn = document.getElementById('speed-dec-btn');
+    this.speedPresetBtns = document.querySelectorAll('.speed-preset-btn');
+    this.lobbySpeedPills = document.querySelectorAll('#lobby-speed-pills .pill-btn');
+    this.lobbyTimerPills = document.querySelectorAll('#lobby-timer-pills .pill-btn');
+    this.lobbySettingsTitle = document.getElementById('lobby-settings-title');
+    this.isCurrentHost = false;
+
+    // Phase banner elements
+    this.phaseBanner = document.getElementById('phase-banner');
+    this.phaseTitle = document.getElementById('phase-title');
+    this.phaseDescription = document.getElementById('phase-description');
+
+    // Mobile controls
+    this.mobileJumpBtn = document.getElementById('mobile-jump-btn');
+
+    // Flag Toss animation overlay (triggered on match start)
+    this.tossOverlay = document.getElementById('toss-overlay');
+    this.tossCoin = document.getElementById('toss-coin');
+    this.tossAvatar = document.getElementById('toss-avatar');
+    this.tossName = document.getElementById('toss-name');
+    this.tossWinnerBanner = document.getElementById('toss-winner-banner');
+    this.tossWinnerName = document.getElementById('toss-winner-name');
+    this.tossInterval = null;
+    this.tossTimeout = null;
+
+    this.currentSpeed = 440;
+    this.currentMult = 1.0;
+    this.selectedTimer = 120;
+    this.onSpeedChangeRequest = null;
 
     this.init();
   }
@@ -69,6 +106,86 @@ export class UIManager {
       });
     }
 
+    // Volume slider listener
+    if (this.volumeSlider) {
+      this.volumeSlider.value = soundSynth.volume * 100;
+      this.volumeSlider.addEventListener('input', (e) => {
+        const vol = parseFloat(e.target.value) / 100;
+        soundSynth.setVolume(vol);
+      });
+    }
+
+    // Speed control button listeners (Host only)
+    if (this.speedIncBtn) {
+      this.speedIncBtn.addEventListener('click', () => {
+        if (!this.isCurrentHost) {
+          this.showToast('⚠️ Only the room host (👑) can change match speed.', 'error');
+          return;
+        }
+        if (typeof this.onSpeedChangeRequest === 'function') {
+          this.onSpeedChangeRequest({ delta: 40 });
+        }
+      });
+    }
+
+    if (this.speedDecBtn) {
+      this.speedDecBtn.addEventListener('click', () => {
+        if (!this.isCurrentHost) {
+          this.showToast('⚠️ Only the room host (👑) can change match speed.', 'error');
+          return;
+        }
+        if (typeof this.onSpeedChangeRequest === 'function') {
+          this.onSpeedChangeRequest({ delta: -40 });
+        }
+      });
+    }
+
+    if (this.speedPresetBtns) {
+      this.speedPresetBtns.forEach((btn) => {
+        btn.addEventListener('click', () => {
+          if (!this.isCurrentHost) {
+            this.showToast('⚠️ Only the room host (👑) can change match speed.', 'error');
+            return;
+          }
+          const mult = parseFloat(btn.dataset.mult);
+          if (typeof this.onSpeedChangeRequest === 'function' && !isNaN(mult)) {
+            this.onSpeedChangeRequest({ multiplier: mult });
+          }
+        });
+      });
+    }
+
+    // Lobby settings pills listeners (Host only)
+    if (this.lobbySpeedPills) {
+      this.lobbySpeedPills.forEach((pill) => {
+        pill.addEventListener('click', () => {
+          if (!this.isCurrentHost) {
+            this.showToast('⚠️ Only the room host (👑) can change match speed.', 'error');
+            return;
+          }
+          const mult = parseFloat(pill.dataset.speedMult);
+          if (typeof this.onSpeedChangeRequest === 'function' && !isNaN(mult)) {
+            this.onSpeedChangeRequest({ multiplier: mult });
+          }
+        });
+      });
+    }
+
+    if (this.lobbyTimerPills) {
+      this.lobbyTimerPills.forEach((pill) => {
+        pill.addEventListener('click', () => {
+          if (!this.isCurrentHost) {
+            this.showToast('⚠️ Only the room host (👑) can change round duration.', 'error');
+            return;
+          }
+          this.lobbyTimerPills.forEach((p) => p.classList.remove('active'));
+          pill.classList.add('active');
+          this.selectedTimer = parseInt(pill.dataset.timer, 10) || 120;
+          this.updateHudTimer(this.selectedTimer);
+        });
+      });
+    }
+
     // Copy invite button
     if (this.copyInviteBtn) {
       this.copyInviteBtn.addEventListener('click', () => {
@@ -81,6 +198,15 @@ export class UIManager {
             this.copyInviteBtn.textContent = originalText;
           }, 2000);
         });
+      });
+    }
+
+    // Toss flag button
+    if (this.tossTestBtn) {
+      this.tossTestBtn.addEventListener('click', () => {
+        if (typeof this.onTossRequest === 'function') {
+          this.onTossRequest();
+        }
       });
     }
   }
@@ -124,14 +250,42 @@ export class UIManager {
     this.playerCount.textContent = players.length;
 
     const isHost = roomState.hostId === myId;
+    this.isCurrentHost = isHost;
+
     if (isHost) {
       this.startGameBtn.classList.remove('hidden');
       this.waitingNotice.classList.add('hidden');
       this.startGameBtn.disabled = players.length < 2;
       this.startGameBtn.title = players.length < 2 ? 'Need at least 2 players' : 'Start Match';
+
+      if (this.lobbySettingsTitle) {
+        this.lobbySettingsTitle.innerHTML = '⚙️ MATCH SETTINGS <span class="badge-role-tag host-tag">👑 You Control Settings</span>';
+      }
+
+      this.lobbySpeedPills?.forEach((pill) => {
+        pill.disabled = false;
+        pill.classList.remove('disabled-guest');
+      });
+      this.lobbyTimerPills?.forEach((pill) => {
+        pill.disabled = false;
+        pill.classList.remove('disabled-guest');
+      });
     } else {
       this.startGameBtn.classList.add('hidden');
       this.waitingNotice.classList.remove('hidden');
+
+      if (this.lobbySettingsTitle) {
+        this.lobbySettingsTitle.innerHTML = '⚙️ MATCH SETTINGS <span class="badge-role-tag guest-tag">🔒 Controlled by Host (👑)</span>';
+      }
+
+      this.lobbySpeedPills?.forEach((pill) => {
+        pill.disabled = true;
+        pill.classList.add('disabled-guest');
+      });
+      this.lobbyTimerPills?.forEach((pill) => {
+        pill.disabled = true;
+        pill.classList.add('disabled-guest');
+      });
     }
 
     // Populate roster
@@ -158,6 +312,73 @@ export class UIManager {
       card.appendChild(badge);
       this.lobbyPlayerList.appendChild(card);
     });
+  }
+
+  showTossAnimation(tossData) {
+    if (!this.tossOverlay) return;
+
+    if (this.tossInterval) clearInterval(this.tossInterval);
+    if (this.tossTimeout) clearTimeout(this.tossTimeout);
+
+    const candidates = tossData.candidates || [];
+    const winnerName = tossData.winnerName || 'Player';
+    const winnerColor = tossData.winnerColor || '#f59e0b';
+    const startingBonus = tossData.startingBonus || 30;
+
+    // Show toss overlay
+    this.tossOverlay.classList.remove('hidden');
+    if (this.tossCoin) this.tossCoin.classList.add('flipping');
+    if (this.tossWinnerBanner) this.tossWinnerBanner.classList.add('hidden');
+
+    let step = 0;
+    const maxSteps = 16;
+    const intervalMs = 90;
+
+    this.tossInterval = setInterval(() => {
+      step++;
+      const currentCandidate = candidates[step % candidates.length] || { name: 'Player', color: { css: '#06b6d4' } };
+
+      if (this.tossAvatar) {
+        this.tossAvatar.style.backgroundColor = currentCandidate.color?.css || '#06b6d4';
+        this.tossAvatar.textContent = (currentCandidate.name || 'P').charAt(0).toUpperCase();
+      }
+      if (this.tossName) {
+        this.tossName.textContent = currentCandidate.name;
+      }
+
+      soundSynth.playTossSpin(step);
+
+      if (step >= maxSteps) {
+        clearInterval(this.tossInterval);
+        this.tossInterval = null;
+
+        // Reveal winner!
+        if (this.tossCoin) this.tossCoin.classList.remove('flipping');
+        if (this.tossAvatar) {
+          this.tossAvatar.style.backgroundColor = winnerColor;
+          this.tossAvatar.textContent = winnerName.charAt(0).toUpperCase();
+        }
+        if (this.tossName) {
+          this.tossName.textContent = winnerName;
+        }
+
+        if (this.tossWinnerBanner) {
+          this.tossWinnerBanner.classList.remove('hidden');
+        }
+        if (this.tossWinnerName) {
+          this.tossWinnerName.innerHTML = `<span style="color:${winnerColor}">🚩</span> ${winnerName}`;
+        }
+
+        soundSynth.playTossWin();
+        this.showToast(`🪙 Flag Toss: ${winnerName} gets the flag! (+${startingBonus} bonus)`, 'bonus');
+        this.updateHudFlagHolder(winnerName, winnerColor);
+
+        // Auto hide toss overlay after display
+        this.tossTimeout = setTimeout(() => {
+          if (this.tossOverlay) this.tossOverlay.classList.add('hidden');
+        }, 1800);
+      }
+    }, intervalMs);
   }
 
   showCountdown(number) {
@@ -194,39 +415,74 @@ export class UIManager {
     }
   }
 
+  updateSpeedDisplay(speed, mult) {
+    this.currentSpeed = Math.round(speed || 440);
+    this.currentMult = typeof mult === 'number' ? Math.round(mult * 10) / 10 : 1.0;
+
+    if (this.speedValue) {
+      this.speedValue.textContent = this.currentSpeed;
+    }
+    if (this.speedMult) {
+      this.speedMult.textContent = `${this.currentMult.toFixed(1)}x`;
+    }
+
+    if (this.speedPresetBtns) {
+      this.speedPresetBtns.forEach((btn) => {
+        const btnMult = parseFloat(btn.dataset.mult);
+        btn.classList.toggle('active', Math.abs(btnMult - this.currentMult) < 0.05);
+      });
+    }
+
+    if (this.lobbySpeedPills) {
+      this.lobbySpeedPills.forEach((pill) => {
+        const pillMult = parseFloat(pill.dataset.speedMult);
+        pill.classList.toggle('active', Math.abs(pillMult - this.currentMult) < 0.05);
+      });
+    }
+  }
+
   updateScoreboard(players, flagHolderId) {
     if (!this.scoreboardList) return;
+
+    if (!players || players.length === 0) {
+      this.scoreboardList.innerHTML = '<div class="score-empty-hint">Waiting for round to start...</div>';
+      return;
+    }
 
     // Sort players by score descending
     const sorted = [...players].sort((a, b) => b.s - a.s);
 
     this.scoreboardList.innerHTML = '';
-    sorted.forEach((p) => {
-      const row = document.createElement('div');
+    sorted.forEach((p, idx) => {
+      const chip = document.createElement('div');
       const isHolder = p.id === flagHolderId;
-      row.className = `scoreboard-row ${isHolder ? 'holding-flag' : ''}`;
+      chip.className = `score-chip ${isHolder ? 'is-holder' : ''}`;
 
-      const left = document.createElement('div');
-      left.className = 'scoreboard-player-info';
+      // Rank badge
+      const rank = document.createElement('span');
+      rank.className = `score-rank rank-${idx + 1}`;
+      rank.textContent = idx === 0 ? '👑' : `#${idx + 1}`;
 
-      const dot = document.createElement('div');
-      dot.className = 'scoreboard-dot';
+      // Colored avatar dot
+      const dot = document.createElement('span');
+      dot.className = 'score-dot';
       dot.style.backgroundColor = p.colorCss || '#06b6d4';
 
+      // Player name
       const name = document.createElement('span');
-      name.className = 'scoreboard-name';
+      name.className = 'score-name';
       name.textContent = (isHolder ? '🚩 ' : '') + (p.name || 'Player');
 
-      left.appendChild(dot);
-      left.appendChild(name);
-
+      // Points
       const score = document.createElement('span');
-      score.className = 'scoreboard-score';
+      score.className = 'score-points';
       score.textContent = p.s;
 
-      row.appendChild(left);
-      row.appendChild(score);
-      this.scoreboardList.appendChild(row);
+      chip.appendChild(rank);
+      chip.appendChild(dot);
+      chip.appendChild(name);
+      chip.appendChild(score);
+      this.scoreboardList.appendChild(chip);
     });
   }
 
@@ -293,5 +549,93 @@ export class UIManager {
         toast.parentNode.removeChild(toast);
       }
     }, 2800);
+  }
+
+  // --- Settings Panel Visibility Control ---
+
+  /**
+   * Hide and disable speed control panel during active gameplay.
+   * Called when countdown starts or match is in progress.
+   */
+  lockSettings() {
+    if (this.speedControlPanel) {
+      this.speedControlPanel.style.display = 'none';
+    }
+    if (this.speedIncBtn) this.speedIncBtn.disabled = true;
+    if (this.speedDecBtn) this.speedDecBtn.disabled = true;
+    if (this.speedPresetBtns) {
+      this.speedPresetBtns.forEach((btn) => (btn.disabled = true));
+    }
+    if (this.lobbySpeedPills) {
+      this.lobbySpeedPills.forEach((pill) => (pill.disabled = true));
+    }
+    if (this.lobbyTimerPills) {
+      this.lobbyTimerPills.forEach((pill) => (pill.disabled = true));
+    }
+  }
+
+  /**
+   * Show and enable speed control panel when returning to lobby or on results screen.
+   */
+  unlockSettings() {
+    if (this.speedControlPanel) {
+      this.speedControlPanel.style.display = '';
+    }
+    if (this.speedIncBtn) this.speedIncBtn.disabled = false;
+    if (this.speedDecBtn) this.speedDecBtn.disabled = false;
+    if (this.speedPresetBtns) {
+      this.speedPresetBtns.forEach((btn) => (btn.disabled = false));
+    }
+    if (this.lobbySpeedPills) {
+      this.lobbySpeedPills.forEach((pill) => (pill.disabled = false));
+    }
+    if (this.lobbyTimerPills) {
+      this.lobbyTimerPills.forEach((pill) => (pill.disabled = false));
+    }
+  }
+
+  // --- Dynamic Scoring Phase Banner ---
+
+  /**
+   * Show unobtrusive 5-second advance warning before a scoring phase activates.
+   */
+  showPhaseWarning(data) {
+    if (!this.phaseBanner || !data) return;
+
+    this.phaseBanner.classList.remove('hidden', 'active');
+    this.phaseBanner.classList.add('warning');
+
+    if (this.phaseTitle) {
+      this.phaseTitle.textContent = '⚡ BONUS PHASE INCOMING';
+    }
+    if (this.phaseDescription) {
+      this.phaseDescription.textContent = `${data.name || 'Special Scoring'} starts in 5 seconds!`;
+    }
+  }
+
+  /**
+   * Show active scoring phase banner with live multiplier indicator.
+   */
+  showPhaseActive(data) {
+    if (!this.phaseBanner || !data) return;
+
+    this.phaseBanner.classList.remove('hidden', 'warning');
+    this.phaseBanner.classList.add('active');
+
+    if (this.phaseTitle) {
+      this.phaseTitle.textContent = `🔥 ${data.name || 'BONUS PHASE'}`;
+    }
+    if (this.phaseDescription) {
+      this.phaseDescription.textContent = data.description || 'Special scoring rules active!';
+    }
+  }
+
+  /**
+   * Hide scoring phase banner when phase ends or round completes.
+   */
+  hidePhaseActive() {
+    if (!this.phaseBanner) return;
+    this.phaseBanner.classList.add('hidden');
+    this.phaseBanner.classList.remove('warning', 'active');
   }
 }

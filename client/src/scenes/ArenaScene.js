@@ -1,6 +1,6 @@
-// Phaser 3 2D Arena Scene: rendering, interpolation, flag animations, and particle FX
+// Phaser 3 2D Side-View Platform Arena Scene: rendering, physics interpolation, animations, and particle FX
 import Phaser from 'phaser';
-import { ARENA, OBSTACLES, PLAYER_CONFIG, EVENTS } from '../../../shared/constants.js';
+import { ARENA, PLATFORMS, SPRINGS, PLAYER_CONFIG, EVENTS } from '../../../shared/constants.js';
 import { soundSynth } from '../ui/soundSynth.js';
 
 export class ArenaScene extends Phaser.Scene {
@@ -11,18 +11,21 @@ export class ArenaScene extends Phaser.Scene {
     this.uiManager = null;
 
     this.myId = null;
-    this.playersMap = new Map(); // socketId -> Phaser visual container
+    this.playersMap = new Map(); // socketId -> visual container
     this.serverPlayerStates = new Map(); // socketId -> latest target snapshot
     this.flagHolderId = null;
 
-    // Flag visual elements
-    this.flagGraphic = null;
+    // Visual elements
+    this.springGraphics = new Map(); // springId -> container
+    this.flagContainer = null;
     this.flagGlowRing = null;
 
     // Input tracking
     this.cursors = null;
     this.wasd = null;
-    this.lastSentInput = { x: 0, y: 0 };
+    this.spaceKey = null;
+    this.mobileJumpPressed = false;
+    this.lastSentInput = { x: 0, jump: false, dropDown: false };
     this.inputSendTimer = 0;
   }
 
@@ -34,16 +37,19 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   create() {
-    // 1. Draw Arena Floor & Grid
-    this.drawArenaEnvironment();
+    // 1. Draw 2D Side-View Platform Scenery & Backdrop
+    this.drawSceneryBackground();
 
-    // 2. Draw Obstacles
-    this.drawObstacles();
+    // 2. Draw Platforms (Ground, Wood, Stone, Suspension)
+    this.drawPlatforms();
 
-    // 3. Create Shared Flag Visual Object
+    // 3. Draw Spring Pads / Tyre Launchers
+    this.drawSpringPads();
+
+    // 4. Create Flag Visual Object
     this.createFlagVisuals();
 
-    // 4. Setup Keyboard Controls
+    // 5. Setup Keyboard Controls
     this.cursors = this.input.keyboard.createCursorKeys();
     this.wasd = this.input.keyboard.addKeys({
       up: Phaser.Input.Keyboard.KeyCodes.W,
@@ -51,115 +57,250 @@ export class ArenaScene extends Phaser.Scene {
       down: Phaser.Input.Keyboard.KeyCodes.S,
       right: Phaser.Input.Keyboard.KeyCodes.D,
     });
+    this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
 
-    // 5. Setup Camera
-    this.cameras.main.setBounds(0, 0, ARENA.WIDTH, ARENA.HEIGHT);
+    // 6. Setup Responsive Full-Viewport Camera
+    this.cameras.main.setBounds(-200, -200, ARENA.WIDTH + 400, ARENA.HEIGHT + 400);
     this.fitCameraToScreen();
     this.scale.on('resize', this.fitCameraToScreen, this);
 
-    // 6. Hook Network Events
+    // 7. Hook Network Events
     this.setupNetworkHooks();
+
+    // 8. Bind Mobile Jump Button if present in DOM
+    const mobileJumpBtn = document.getElementById('mobile-jump-btn');
+    if (mobileJumpBtn) {
+      mobileJumpBtn.addEventListener('pointerdown', (e) => {
+        e.preventDefault();
+        this.mobileJumpPressed = true;
+      });
+      const clearJump = () => { this.mobileJumpPressed = false; };
+      mobileJumpBtn.addEventListener('pointerup', clearJump);
+      mobileJumpBtn.addEventListener('pointercancel', clearJump);
+      mobileJumpBtn.addEventListener('pointerleave', clearJump);
+    }
   }
 
   fitCameraToScreen() {
     const width = this.scale.width;
     const height = this.scale.height;
 
+    // Direct aspect-fill zoom so the playable arena occupies 100% of the screen
+    // Zero empty margins on any screen width or aspect ratio!
     const zoomX = width / ARENA.WIDTH;
     const zoomY = height / ARENA.HEIGHT;
-    const zoom = Math.min(zoomX, zoomY, 1.0);
 
-    this.cameras.main.setZoom(zoom);
+    this.cameras.main.setZoom(zoomX, zoomY);
     this.cameras.main.centerOn(ARENA.WIDTH / 2, ARENA.HEIGHT / 2);
   }
 
-  drawArenaEnvironment() {
-    // Background floor
+  drawSceneryBackground() {
+    // 1. Atmospheric Sky Backdrop (covers wide and tall displays)
     const bg = this.add.graphics();
-    bg.fillStyle(ARENA.FLOOR_COLOR, 1);
-    bg.fillRect(0, 0, ARENA.WIDTH, ARENA.HEIGHT);
+    bg.fillGradientStyle(0x070b14, 0x070b14, 0x1e1b4b, 0x0f172a, 1);
+    bg.fillRect(-400, -400, ARENA.WIDTH + 800, ARENA.HEIGHT + 800);
 
-    // Subtle grid lines
-    bg.lineStyle(1, ARENA.GRID_COLOR, 0.5);
-    const gridSize = 80;
-    for (let x = 0; x <= ARENA.WIDTH; x += gridSize) {
-      bg.lineBetween(x, 0, x, ARENA.HEIGHT);
-    }
-    for (let y = 0; y <= ARENA.HEIGHT; y += gridSize) {
-      bg.lineBetween(0, y, ARENA.WIDTH, y);
+    // 2. Distant mountain silhouettes
+    const mountains = this.add.graphics();
+    mountains.fillStyle(0x0f172a, 0.7);
+    mountains.beginPath();
+    mountains.moveTo(-200, 940);
+    mountains.lineTo(100, 480);
+    mountains.lineTo(350, 700);
+    mountains.lineTo(600, 380);
+    mountains.lineTo(900, 680);
+    mountains.lineTo(1200, 420);
+    mountains.lineTo(1500, 720);
+    mountains.lineTo(1800, 500);
+    mountains.lineTo(1900, 940);
+    mountains.closePath();
+    mountains.fillPath();
+
+    // Midground hills
+    mountains.fillStyle(0x131f37, 0.85);
+    mountains.beginPath();
+    mountains.moveTo(-200, 940);
+    mountains.lineTo(250, 620);
+    mountains.lineTo(500, 800);
+    mountains.lineTo(800, 560);
+    mountains.lineTo(1100, 780);
+    mountains.lineTo(1450, 600);
+    mountains.lineTo(1900, 940);
+    mountains.closePath();
+    mountains.fillPath();
+
+    // Starfield specks
+    const stars = this.add.graphics();
+    stars.fillStyle(0xffffff, 0.6);
+    for (let i = 0; i < 90; i++) {
+      const sx = (i * 179 + 43) % ARENA.WIDTH;
+      const sy = (i * 83 + 27) % 550;
+      stars.fillCircle(sx, sy, (i % 3 === 0) ? 1.5 : 1);
     }
 
-    // Outer Boundary Walls
+    // 3. Arena Outer Boundary Outlines
     const wallG = this.add.graphics();
     const wt = ARENA.WALL_THICKNESS;
 
-    // Glowing border outline
-    wallG.lineStyle(4, 0x06b6d4, 0.4);
+    // Glowing cyan arena boundary lines
+    wallG.lineStyle(3, 0x06b6d4, 0.5);
     wallG.strokeRect(wt / 2, wt / 2, ARENA.WIDTH - wt, ARENA.HEIGHT - wt);
 
-    // Solid dark slate border walls
-    wallG.fillStyle(ARENA.BOUNDS_COLOR, 1);
-    wallG.fillRect(0, 0, ARENA.WIDTH, wt); // Top
-    wallG.fillRect(0, ARENA.HEIGHT - wt, ARENA.WIDTH, wt); // Bottom
+    // Dark solid border walls
+    wallG.fillStyle(0x090d16, 1);
+    wallG.fillRect(0, 0, ARENA.WIDTH, wt); // Ceiling
     wallG.fillRect(0, 0, wt, ARENA.HEIGHT); // Left
     wallG.fillRect(ARENA.WIDTH - wt, 0, wt, ARENA.HEIGHT); // Right
   }
 
-  drawObstacles() {
-    const obsGraphics = this.add.graphics();
+  drawPlatforms() {
+    const g = this.add.graphics();
 
-    for (const obs of OBSTACLES) {
-      // Obstacle body
-      obsGraphics.fillStyle(0x1e293b, 1);
-      obsGraphics.fillRoundedRect(obs.x, obs.y, obs.width, obs.height, 8);
+    for (const plat of PLATFORMS) {
+      if (plat.type === 'ground') {
+        // Continuous bedrock ground floor
+        g.fillStyle(0x0f172a, 1);
+        g.fillRect(plat.x, plat.y, plat.width, plat.height);
 
-      // Obstacle inner bevel
-      obsGraphics.fillStyle(0x334155, 0.6);
-      obsGraphics.fillRoundedRect(obs.x + 3, obs.y + 3, obs.width - 6, obs.height - 6, 6);
+        // Neon cyan hazard boundary strip along top of ground
+        g.fillStyle(0x06b6d4, 1);
+        g.fillRect(plat.x, plat.y, plat.width, 4);
 
-      // Obstacle border
-      obsGraphics.lineStyle(2, 0x475569, 0.8);
-      obsGraphics.strokeRoundedRect(obs.x, obs.y, obs.width, obs.height, 8);
+        // Subsurface foundation detail
+        g.fillStyle(0x1e293b, 1);
+        g.fillRect(plat.x, plat.y + 4, plat.width, plat.height - 4);
+      } else if (plat.type === 'stone') {
+        // High-tech slate stone platform
+        g.fillStyle(0x1e293b, 1);
+        g.fillRoundedRect(plat.x, plat.y, plat.width, plat.height, 6);
+
+        // Top landing surface highlight
+        g.fillStyle(0x38bdf8, 0.9);
+        g.fillRoundedRect(plat.x + 2, plat.y, plat.width - 4, 3, 2);
+
+        // Inner beveled core
+        g.fillStyle(0x334155, 0.7);
+        g.fillRoundedRect(plat.x + 4, plat.y + 4, plat.width - 8, plat.height - 7, 4);
+      } else if (plat.type === 'wood') {
+        // Warm wooden bridge planks
+        g.fillStyle(0x78350f, 1);
+        g.fillRoundedRect(plat.x, plat.y, plat.width, plat.height, 5);
+
+        // Golden amber landing surface
+        g.fillStyle(0xf59e0b, 0.85);
+        g.fillRoundedRect(plat.x + 2, plat.y, plat.width - 4, 3, 2);
+
+        // Plank divisions
+        g.lineStyle(1.5, 0x451a03, 0.8);
+        const step = 40;
+        for (let px = plat.x + step; px < plat.x + plat.width; px += step) {
+          g.lineBetween(px, plat.y + 3, px, plat.y + plat.height - 2);
+        }
+      } else if (plat.type === 'suspension') {
+        // Suspended wire bridge with vertical support cables
+        g.lineStyle(1.5, 0x64748b, 0.4);
+        g.lineBetween(plat.x + 20, 0, plat.x + 20, plat.y);
+        g.lineBetween(plat.x + plat.width - 20, 0, plat.x + plat.width - 20, plat.y);
+
+        // Bridge walkway
+        g.fillStyle(0x1e293b, 1);
+        g.fillRoundedRect(plat.x, plat.y, plat.width, plat.height, 4);
+
+        // Glowing emerald accent strip
+        g.fillStyle(0x10b981, 0.85);
+        g.fillRoundedRect(plat.x + 2, plat.y, plat.width - 4, 3, 2);
+      }
+    }
+  }
+
+  drawSpringPads() {
+    for (const spring of SPRINGS) {
+      const container = this.add.container(spring.x + spring.width / 2, spring.y + spring.height / 2);
+      container.setDepth(14);
+
+      const w = spring.width;
+      const h = spring.height;
+
+      // Base tyre launcher graphics
+      const baseG = this.add.graphics();
+
+      // Outer heavy-duty rubber tyre chassis
+      baseG.fillStyle(0x0f172a, 1);
+      baseG.fillRoundedRect(-w / 2, -h / 2 + 2, w, h - 2, 7);
+      baseG.lineStyle(2, 0x334155, 1);
+      baseG.strokeRoundedRect(-w / 2, -h / 2 + 2, w, h - 2, 7);
+
+      // Tyre tread grooves
+      baseG.fillStyle(0x1e293b, 1);
+      const treadStep = 18;
+      for (let tx = -w / 2 + 10; tx < w / 2 - 6; tx += treadStep) {
+        baseG.fillRect(tx, -h / 2 + 6, 6, h - 8);
+      }
+
+      // High-energy inner core glow
+      baseG.fillStyle(0xf59e0b, 0.35);
+      baseG.fillRoundedRect(-w / 2 + 8, -h / 2 + 4, w - 16, h - 8, 4);
+
+      // Upward launch chevron indicators (▲ ▲ ▲)
+      baseG.fillStyle(0xfef08a, 0.95);
+      [-w / 4, 0, w / 4].forEach((cx) => {
+        baseG.beginPath();
+        baseG.moveTo(cx, -h / 2 + 4);
+        baseG.lineTo(cx + 6, -h / 2 + 12);
+        baseG.lineTo(cx - 6, -h / 2 + 12);
+        baseG.closePath();
+        baseG.fillPath();
+      });
+
+      // Spring launch plate on top
+      const plate = this.add.graphics();
+      plate.fillStyle(0xf59e0b, 1);
+      plate.fillRoundedRect(-w / 2, -h / 2, w, 6, 3);
+      plate.lineStyle(2, 0xffedd5, 1);
+      plate.strokeRoundedRect(-w / 2, -h / 2, w, 6, 3);
+
+      container.add(baseG);
+      container.add(plate);
+
+      this.springGraphics.set(spring.id, { container, plate });
     }
   }
 
   createFlagVisuals() {
     // Pulsing aura ring behind flag holder
     this.flagGlowRing = this.add.graphics();
-    this.flagGlowRing.setDepth(15);
+    this.flagGlowRing.setDepth(18);
     this.flagGlowRing.setVisible(false);
 
-    // Floating flag icon container
+    // Floating flag container
     this.flagContainer = this.add.container(0, 0);
-    this.flagContainer.setDepth(30);
+    this.flagContainer.setDepth(32);
     this.flagContainer.setVisible(false);
 
-    // Flag banner graphics
     const flagG = this.add.graphics();
     // Flag pole
     flagG.lineStyle(3, 0xffffff, 1);
-    flagG.lineBetween(0, 0, 0, -32);
+    flagG.lineBetween(0, 0, 0, -34);
 
-    // Golden flag cloth
+    // Golden flag banner cloth
     flagG.fillStyle(0xf59e0b, 1);
     flagG.beginPath();
-    flagG.moveTo(0, -32);
-    flagG.lineTo(24, -24);
+    flagG.moveTo(0, -34);
+    flagG.lineTo(26, -25);
     flagG.lineTo(0, -16);
     flagG.closePath();
     flagG.fillPath();
 
-    // Flag outline
     flagG.lineStyle(1.5, 0xffedd5, 1);
     flagG.strokePath();
 
     this.flagContainer.add(flagG);
 
-    // Bobbing animation for the flag
+    // Smooth bobbing tween
     this.tweens.add({
       targets: this.flagContainer,
       y: '-=6',
-      duration: 600,
+      duration: 500,
       yoyo: true,
       repeat: -1,
       ease: 'Sine.easeInOut',
@@ -167,25 +308,55 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   setupNetworkHooks() {
-    // Snapshot state from authoritative server
+    // 1. Snapshot state
     this.socketClient.on(EVENTS.SERVER.GAME_SNAPSHOT, (snap) => {
       this.handleSnapshot(snap);
     });
 
-    // Instant flag transfer FX
+    // 2. Flag transferred
     this.socketClient.on(EVENTS.SERVER.FLAG_TRANSFERRED, (data) => {
       this.onFlagTransferred(data);
     });
 
-    // Hold bonus FX
-    this.socketClient.on(EVENTS.SERVER.HOLD_BONUS_AWARDED, (data) => {
-      this.onHoldBonus(data);
+    // 3. Spring launcher triggered
+    this.socketClient.on(EVENTS.SERVER.SPRING_TRIGGERED, (data) => {
+      this.onSpringTriggered(data);
     });
 
-    // Match start
+    // 4. Dynamic scoring phases
+    this.socketClient.on(EVENTS.SERVER.PHASE_WARNING, (data) => {
+      soundSynth.playPhaseWarning();
+      if (this.uiManager?.showPhaseWarning) {
+        this.uiManager.showPhaseWarning(data);
+      }
+    });
+
+    this.socketClient.on(EVENTS.SERVER.PHASE_STARTED, (data) => {
+      soundSynth.playPhaseStart();
+      if (this.uiManager?.showPhaseActive) {
+        this.uiManager.showPhaseActive(data);
+      }
+    });
+
+    this.socketClient.on(EVENTS.SERVER.PHASE_ENDED, () => {
+      if (this.uiManager?.hidePhaseActive) {
+        this.uiManager.hidePhaseActive();
+      }
+    });
+
+    // 5. Match start
     this.socketClient.on(EVENTS.SERVER.GAME_STARTED, (data) => {
       this.flagHolderId = data.flagHolderId;
-      this.uiManager.showToast('🚀 MATCH STARTED! TAG PLAYERS TO PASS THE FLAG!', 'bonus');
+      soundSynth.startBGM();
+      this.uiManager.showToast('🚀 MATCH STARTED! JUMP & PLATFORM TO TAG THE FLAG!', 'bonus');
+    });
+
+    // 6. Match end
+    this.socketClient.on(EVENTS.SERVER.GAME_ENDED, () => {
+      soundSynth.stopBGM();
+      if (this.uiManager?.hidePhaseActive) {
+        this.uiManager.hidePhaseActive();
+      }
     });
   }
 
@@ -204,7 +375,7 @@ export class ArenaScene extends Phaser.Scene {
       }
     });
 
-    // Remove disconnected players
+    // Clean up disconnected players
     for (const [id, visual] of this.playersMap.entries()) {
       if (!activeIds.has(id)) {
         visual.container.destroy();
@@ -236,27 +407,26 @@ export class ArenaScene extends Phaser.Scene {
     const container = this.add.container(serverP.x, serverP.y);
     container.setDepth(20);
 
-    // Find color definition
     const colorObj = PLAYER_CONFIG.COLORS.find((c) => c.hex === serverP.colorHex) ||
                      PLAYER_CONFIG.COLORS[this.playersMap.size % PLAYER_CONFIG.COLORS.length];
 
     const radius = PLAYER_CONFIG.RADIUS;
 
-    // Outer glow / shadow
+    // Shadow
     const shadow = this.add.graphics();
     shadow.fillStyle(0x000000, 0.35);
     shadow.fillCircle(0, 4, radius);
     container.add(shadow);
 
-    // Main body circle
+    // Main body
     const body = this.add.graphics();
     body.fillStyle(colorObj.hex, 1);
     body.fillCircle(0, 0, radius);
-    body.lineStyle(2.5, 0xffffff, 0.85);
+    body.lineStyle(2.5, 0xffffff, 0.9);
     body.strokeCircle(0, 0, radius);
     container.add(body);
 
-    // Cute facial eyes pointing forward
+    // Eyes
     const eyeG = this.add.graphics();
     eyeG.fillStyle(0xffffff, 1);
     eyeG.fillCircle(-7, -4, 4);
@@ -306,97 +476,74 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   onFlagTransferred(data) {
-    const fromP = this.playersMap.get(data.fromId);
-    const toP = this.playersMap.get(data.toId);
-
+    // Sound effect on flag transfer
     soundSynth.playPass();
 
-    // Floating popup text
     const textX = data.x || 800;
-    const textY = (data.y || 500) - 30;
+    const textY = data.y || 500;
 
-    const popup = this.add.text(textX, textY, `+${data.passBonus} PASS!`, {
-      fontFamily: 'Outfit, sans-serif',
-      fontSize: '18px',
-      fontStyle: '900',
-      color: '#38bdf8',
-      stroke: '#000000',
-      strokeThickness: 4,
-    });
-    popup.setOrigin(0.5);
-    popup.setDepth(50);
-
-    this.tweens.add({
-      targets: popup,
-      y: textY - 40,
-      alpha: 0,
-      scale: 1.3,
-      duration: 800,
-      ease: 'Cubic.easeOut',
-      onComplete: () => popup.destroy(),
-    });
-
-    // Particle flash circle
+    // Particle shockwave ring centered directly on player contact point
     const shockwave = this.add.graphics();
+    shockwave.setPosition(textX, textY);
     shockwave.lineStyle(3, 0x38bdf8, 1);
-    shockwave.strokeCircle(textX, textY, 20);
+    shockwave.strokeCircle(0, 0, 22);
     shockwave.setDepth(45);
 
     this.tweens.add({
       targets: shockwave,
-      scaleX: 2.5,
-      scaleY: 2.5,
+      scaleX: 2.2,
+      scaleY: 2.2,
       alpha: 0,
-      duration: 400,
+      duration: 350,
       ease: 'Quad.easeOut',
       onComplete: () => shockwave.destroy(),
     });
-
-    const fromName = fromP ? fromP.name : 'Player';
-    const toName = toP ? toP.name : 'Player';
-    this.uiManager.showToast(`🚩 ${fromName} passed the flag to ${toName}! (+5)`, 'transfer');
   }
 
-  onHoldBonus(data) {
-    soundSynth.playHoldBonus();
+  onSpringTriggered(data) {
+    // Resonant spring launch SFX
+    soundSynth.playSpringBounce();
 
-    const holder = this.playersMap.get(data.playerId);
-    if (!holder) return;
+    // Visual compression & rebound animation of tyre pad
+    const springObj = this.springGraphics.get(data.springId);
+    if (springObj) {
+      this.tweens.add({
+        targets: springObj.container,
+        scaleY: 0.35,
+        duration: 50,
+        yoyo: true,
+        ease: 'Quad.easeInOut',
+      });
+    }
 
-    const posX = holder.container.x;
-    const posY = holder.container.y - 45;
-
-    const popup = this.add.text(posX, posY, `⭐ +${data.bonus} HOLD BONUS!`, {
-      fontFamily: 'Outfit, sans-serif',
-      fontSize: '20px',
-      fontStyle: '900',
-      color: '#f59e0b',
-      stroke: '#000000',
-      strokeThickness: 4,
-    });
-    popup.setOrigin(0.5);
-    popup.setDepth(55);
-
-    this.tweens.add({
-      targets: popup,
-      y: posY - 50,
-      alpha: 0,
-      scale: 1.4,
-      duration: 900,
-      ease: 'Back.easeOut',
-      onComplete: () => popup.destroy(),
-    });
-
-    this.uiManager.showToast(`⭐ ${holder.name} held for 5s! (+8 bonus)`, 'bonus');
+    // Spark particles centered directly at tyre pad & player feet (does not fly off-screen)
+    const p = this.playersMap.get(data.playerId);
+    if (p) {
+      const sparkX = p.container.x;
+      const sparkY = p.container.y + PLAYER_CONFIG.RADIUS;
+      const spark = this.add.graphics();
+      spark.setPosition(sparkX, sparkY);
+      spark.fillStyle(0xf59e0b, 0.9);
+      spark.fillCircle(0, 0, 10);
+      spark.setDepth(25);
+      this.tweens.add({
+        targets: spark,
+        scaleX: 2.5,
+        scaleY: 0.5,
+        alpha: 0,
+        duration: 250,
+        onComplete: () => spark.destroy(),
+      });
+    }
   }
 
   update(time, delta) {
     const dt = delta / 1000;
 
-    // 1. Process local input and transmit to server
+    // 1. Process local input & transmit to server
     this.handleInput(dt);
 
-    // 2. Interpolate player positions smoothly towards server targets
+    // 2. Interpolate player positions smoothly
     const lerpFactor = Math.min(1, dt * 24);
 
     for (const [id, visual] of this.playersMap.entries()) {
@@ -406,17 +553,25 @@ export class ArenaScene extends Phaser.Scene {
         visual.container.y = Phaser.Math.Linear(visual.container.y, serverP.y, lerpFactor);
         visual.scoreText.setText(serverP.s);
 
-        // Orient eyes toward movement
-        if (Math.hypot(serverP.vx, serverP.vy) > 10) {
-          const angle = Math.atan2(serverP.vy, serverP.vx);
-          const eyeDist = 4;
-          visual.eyeG.x = Math.cos(angle) * eyeDist;
-          visual.eyeG.y = Math.sin(angle) * eyeDist;
+        // Orient eyes toward velocity
+        if (Math.abs(serverP.vx) > 10) {
+          visual.eyeG.x = Math.sign(serverP.vx) * 4;
+        }
+
+        // Squash & stretch based on jumping/grounded state
+        if (!serverP.g) {
+          // Airborne stretch
+          visual.body.scaleY = 1.08;
+          visual.body.scaleX = 0.94;
+        } else {
+          // Grounded normal
+          visual.body.scaleY = 1.0;
+          visual.body.scaleX = 1.0;
         }
       }
     }
 
-    // 3. Render Flag Visuals over the Current Holder
+    // 3. Render Flag Visuals over Current Holder
     this.updateFlagPositions(time);
   }
 
@@ -434,7 +589,7 @@ export class ArenaScene extends Phaser.Scene {
     // Flag attaches right above player's head
     this.flagContainer.setVisible(true);
     this.flagContainer.x = hx;
-    this.flagContainer.y = hy - PLAYER_CONFIG.RADIUS - 12;
+    this.flagContainer.y = hy - PLAYER_CONFIG.RADIUS - 14;
 
     // Pulsing aura ring under player
     this.flagGlowRing.clear();
@@ -448,39 +603,57 @@ export class ArenaScene extends Phaser.Scene {
 
   handleInput(dt) {
     let ix = 0;
-    let iy = 0;
+    let jump = false;
+    let dropDown = false;
 
     // Desktop keyboard input
     if (this.cursors.left.isDown || this.wasd.left.isDown) ix -= 1;
     if (this.cursors.right.isDown || this.wasd.right.isDown) ix += 1;
-    if (this.cursors.up.isDown || this.wasd.up.isDown) iy -= 1;
-    if (this.cursors.down.isDown || this.wasd.down.isDown) iy += 1;
+
+    // Jump: Space, W, Up Arrow, or mobile button
+    if (
+      this.spaceKey?.isDown ||
+      this.cursors.up.isDown ||
+      this.wasd.up.isDown ||
+      this.mobileJumpPressed
+    ) {
+      jump = true;
+    }
+
+    // Drop down through platform: S or Down Arrow
+    if (this.cursors.down.isDown || this.wasd.down.isDown) {
+      dropDown = true;
+    }
 
     // Mobile Virtual Joystick input
     if (this.virtualJoystick) {
       const joy = this.virtualJoystick.getInput();
-      if (Math.hypot(joy.x, joy.y) > 0.05) {
+      if (Math.abs(joy.x) > 0.05) {
         ix = joy.x;
-        iy = joy.y;
+      }
+      if (joy.y < -0.6) {
+        jump = true;
+      } else if (joy.y > 0.6) {
+        dropDown = true;
       }
     }
 
-    // Normalize diagonal input
-    const len = Math.hypot(ix, iy);
-    if (len > 1) {
-      ix /= len;
-      iy /= len;
+    // Sound effect on local jump initiation
+    if (jump && !this.lastSentInput.jump) {
+      soundSynth.playJump();
     }
 
-    // Send input to server at 30 Hz or immediately on direction change
+    // Send input to server at 30 Hz or immediately on state change
     this.inputSendTimer += dt;
-    const inputChanged = Math.abs(ix - this.lastSentInput.x) > 0.02 ||
-                         Math.abs(iy - this.lastSentInput.y) > 0.02;
+    const inputChanged =
+      Math.abs(ix - this.lastSentInput.x) > 0.02 ||
+      jump !== this.lastSentInput.jump ||
+      dropDown !== this.lastSentInput.dropDown;
 
     if (inputChanged || this.inputSendTimer >= 1 / 30) {
-      this.lastSentInput = { x: ix, y: iy };
+      this.lastSentInput = { x: ix, jump, dropDown };
       this.inputSendTimer = 0;
-      this.socketClient.sendInput(ix, iy);
+      this.socketClient.sendInput(ix, 0, jump, dropDown);
     }
   }
 }

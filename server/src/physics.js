@@ -1,14 +1,14 @@
-// Authoritative 2D circle and AABB collision detection and resolution
-import { ARENA, OBSTACLES, PLAYER_CONFIG } from '../../shared/constants.js';
+// Authoritative 2D platform physics, swept collision detection, and spring pads
+import { ARENA, PLATFORMS, SPRINGS, PLAYER_CONFIG } from '../../shared/constants.js';
 
 /**
- * Resolves a circle's position against arena boundary walls.
+ * Resolves a circle's position against arena boundary walls (left, right, ceiling, floor).
  */
 export function resolveBoundaryCollision(x, y, radius = PLAYER_CONFIG.RADIUS) {
   const minX = ARENA.WALL_THICKNESS + radius;
   const maxX = ARENA.WIDTH - ARENA.WALL_THICKNESS - radius;
   const minY = ARENA.WALL_THICKNESS + radius;
-  const maxY = ARENA.HEIGHT - ARENA.WALL_THICKNESS - radius;
+  const maxY = ARENA.GROUND_Y - radius; // Ground floor altitude
 
   return {
     x: Math.max(minX, Math.min(maxX, x)),
@@ -17,11 +17,81 @@ export function resolveBoundaryCollision(x, y, radius = PLAYER_CONFIG.RADIUS) {
 }
 
 /**
+ * Checks if a player's feet land onto a one-way platform from above during a physics tick.
+ * Swept crossing detection prevents passing through platforms when falling fast.
+ *
+ * @param {number} prevY Player Y coordinate before this physics tick
+ * @param {number} newY Player Y coordinate after integrating velocity
+ * @param {number} x Player X coordinate
+ * @param {number} radius Player radius
+ * @param {object} platform Platform rectangle { x, y, width, height }
+ * @returns {boolean} True if player landed onto this platform
+ */
+export function checkPlatformLanding(prevY, newY, x, radius = PLAYER_CONFIG.RADIUS, platform) {
+  // Horizontal bounds check with small tolerance
+  const footTolerance = radius * 0.7;
+  const playerLeft = x - footTolerance;
+  const playerRight = x + footTolerance;
+  const platLeft = platform.x;
+  const platRight = platform.x + platform.width;
+
+  if (playerRight < platLeft || playerLeft > platRight) {
+    return false;
+  }
+
+  // Vertical swept collision check
+  const prevFeet = prevY + radius;
+  const newFeet = newY + radius;
+  const platTop = platform.y;
+
+  // The player's feet must have been above or at platform surface in previous frame (with 8px tolerance),
+  // and reached or passed through the platform surface in the current frame.
+  return prevFeet <= platTop + 8 && newFeet >= platTop;
+}
+
+/**
+ * Checks if a player lands onto or steps onto any spring launcher pad / tyre.
+ *
+ * @param {number} prevY
+ * @param {number} newY
+ * @param {number} x
+ * @param {number} radius
+ * @param {Array} springs
+ * @returns {object|null} The triggered spring or null
+ */
+export function checkSpringPadCollision(prevY, newY, x, radius = PLAYER_CONFIG.RADIUS, springs = SPRINGS) {
+  const prevFeet = prevY + radius;
+  const newFeet = newY + radius;
+
+  for (const spring of springs) {
+    // Horizontal overlap check with generous tolerance
+    const springLeft = spring.x - radius * 0.5;
+    const springRight = spring.x + spring.width + radius * 0.5;
+    const springTop = spring.y;
+    const springBottom = spring.y + spring.height;
+
+    if (x >= springLeft && x <= springRight) {
+      // 1. Falling/landing downward onto spring top
+      const downwardHit = (prevFeet <= springTop + 16 && newFeet >= springTop - 8);
+
+      // 2. Walking horizontally onto spring or standing on spring pad
+      // Check if feet are within spring's vertical bounds (with tolerance)
+      const standingOnSpring = (newFeet >= springTop - 4 && newFeet <= springBottom + 8);
+
+      if (downwardHit || standingOnSpring) {
+        return spring;
+      }
+    }
+  }
+
+  return null;
+}
+
+/**
  * Resolves collision between a circle and an Axis-Aligned Bounding Box (AABB).
- * Returns the corrected {x, y} position of the circle.
+ * Used for solid obstacles or boundary blocks.
  */
 export function resolveCircleAABB(cx, cy, radius, box) {
-  // Clamp circle center to the bounding box
   const nearestX = Math.max(box.x, Math.min(cx, box.x + box.width));
   const nearestY = Math.max(box.y, Math.min(cy, box.y + box.height));
 
@@ -29,14 +99,11 @@ export function resolveCircleAABB(cx, cy, radius, box) {
   const dy = cy - nearestY;
   const distSq = dx * dx + dy * dy;
 
-  // No overlap
   if (distSq >= radius * radius) {
     return { x: cx, y: cy, collided: false };
   }
 
-  // Inside or exactly on edge of the box
   if (distSq === 0) {
-    // Circle center is inside the box: push out along shortest axis
     const leftDist = Math.abs(cx - box.x);
     const rightDist = Math.abs(box.x + box.width - cx);
     const topDist = Math.abs(cy - box.y);
@@ -54,7 +121,6 @@ export function resolveCircleAABB(cx, cy, radius, box) {
     }
   }
 
-  // Circle edge intersects box
   const dist = Math.sqrt(distSq);
   const penetration = radius - dist;
   const nx = dx / dist;
@@ -68,44 +134,36 @@ export function resolveCircleAABB(cx, cy, radius, box) {
 }
 
 /**
- * Resolves a circle against all arena obstacles.
+ * Resolves a circle against solid obstacles and arena boundaries.
  */
-export function resolveAllObstacles(x, y, radius = PLAYER_CONFIG.RADIUS, obstacles = OBSTACLES) {
+export function resolveAllObstacles(x, y, radius = PLAYER_CONFIG.RADIUS, platforms = PLATFORMS) {
   let curX = x;
   let curY = y;
 
-  // Run resolution passes to handle corner intersections cleanly
-  for (let pass = 0; pass < 2; pass++) {
-    for (const obs of obstacles) {
-      const res = resolveCircleAABB(curX, curY, radius, obs);
-      curX = res.x;
-      curY = res.y;
-    }
-    // Also re-clamp to boundaries
-    const bound = resolveBoundaryCollision(curX, curY, radius);
-    curX = bound.x;
-    curY = bound.y;
-  }
+  const bound = resolveBoundaryCollision(curX, curY, radius);
+  curX = bound.x;
+  curY = bound.y;
 
   return { x: curX, y: curY };
 }
 
 /**
- * Checks if two circles overlap.
+ * Checks if two circles overlap or are within generous tag reach.
  */
 export function checkCircleOverlap(c1, c2, r1 = PLAYER_CONFIG.RADIUS, r2 = PLAYER_CONFIG.RADIUS) {
   const dx = c2.x - c1.x;
   const dy = c2.y - c1.y;
   const distSq = dx * dx + dy * dy;
-  const minDist = r1 + r2;
-  return distSq < (minDist * minDist);
+  const minDist = (r1 + r2) * 1.35; // Generous reach (~65px) so visually touching players always transfer
+  return distSq <= (minDist * minDist);
 }
 
 /**
- * Softly resolves overlapping players so they don't walk through each other.
+ * Softly resolves overlapping players horizontally so they don't walk through each other.
+ * Only the moving player gets pushed back; stationary players stay locked in place.
  */
 export function resolvePlayerCollisions(players, radius = PLAYER_CONFIG.RADIUS) {
-  const playerList = Object.values(players);
+  const playerList = Array.from(players.values ? players.values() : Object.values(players));
   const minDist = radius * 2;
 
   for (let i = 0; i < playerList.length; i++) {
@@ -119,23 +177,46 @@ export function resolvePlayerCollisions(players, radius = PLAYER_CONFIG.RADIUS) 
 
       if (distSq < minDist * minDist && distSq > 0.0001) {
         const dist = Math.sqrt(distSq);
-        const overlap = (minDist - dist) * 0.5;
+        const overlap = minDist - dist;
         const nx = dx / dist;
         const ny = dy / dist;
 
-        p1.x -= nx * overlap;
-        p1.y -= ny * overlap;
-        p2.x += nx * overlap;
-        p2.y += ny * overlap;
+        // Check which player is moving (has non-zero input)
+        const p1Moving = Math.abs(p1.inputX || 0) > 0.01;
+        const p2Moving = Math.abs(p2.inputX || 0) > 0.01;
 
-        // Re-resolve against obstacles and walls
-        const r1 = resolveAllObstacles(p1.x, p1.y, radius);
-        p1.x = r1.x;
-        p1.y = r1.y;
+        if (p1Moving && !p2Moving) {
+          // Only p1 is moving, push p1 back entirely
+          p1.x -= nx * overlap;
+          p1.y -= ny * overlap;
 
-        const r2 = resolveAllObstacles(p2.x, p2.y, radius);
-        p2.x = r2.x;
-        p2.y = r2.y;
+          const b1 = resolveBoundaryCollision(p1.x, p1.y, radius);
+          p1.x = b1.x;
+          p1.y = b1.y;
+        } else if (p2Moving && !p1Moving) {
+          // Only p2 is moving, push p2 back entirely
+          p2.x += nx * overlap;
+          p2.y += ny * overlap;
+
+          const b2 = resolveBoundaryCollision(p2.x, p2.y, radius);
+          p2.x = b2.x;
+          p2.y = b2.y;
+        } else {
+          // Both moving or both stationary, split the push equally
+          const halfOverlap = overlap * 0.5;
+          p1.x -= nx * halfOverlap;
+          p1.y -= ny * halfOverlap;
+          p2.x += nx * halfOverlap;
+          p2.y += ny * halfOverlap;
+
+          const b1 = resolveBoundaryCollision(p1.x, p1.y, radius);
+          p1.x = b1.x;
+          p1.y = b1.y;
+
+          const b2 = resolveBoundaryCollision(p2.x, p2.y, radius);
+          p2.x = b2.x;
+          p2.y = b2.y;
+        }
       }
     }
   }

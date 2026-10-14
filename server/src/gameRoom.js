@@ -1,17 +1,21 @@
-// Authoritative Game Room: manages state, simulation tick, scoring, and flag transfers
+// Authoritative Game Room: manages state, simulation tick, scoring, platform physics, and flag transfers
 import {
   ROOM_STATUS,
   ARENA,
+  PLATFORMS,
+  SPRINGS,
   SPAWN_POINTS,
   PLAYER_CONFIG,
+  PHYSICS_CONFIG,
   SCORING_CONFIG,
+  PHASE_CONFIG,
   MATCH_CONFIG,
   EVENTS,
 } from '../../shared/constants.js';
 import {
-  resolveAllObstacles,
+  checkPlatformLanding,
+  checkSpringPadCollision,
   checkCircleOverlap,
-  resolvePlayerCollisions,
 } from './physics.js';
 
 export class GameRoom {
@@ -28,6 +32,10 @@ export class GameRoom {
 
     this.scoringConfig = { ...SCORING_CONFIG, ...(customConfig.scoring || {}) };
     this.matchConfig = { ...MATCH_CONFIG, ...(customConfig.match || {}) };
+    this.playerConfig = { ...PLAYER_CONFIG, ...(customConfig.player || {}) };
+
+    this.baseSpeed = this.playerConfig.BASE_SPEED;
+    this.speedMultiplier = 1.0;
 
     this.status = ROOM_STATUS.LOBBY;
     this.players = new Map(); // socketId -> Player
@@ -35,11 +43,15 @@ export class GameRoom {
 
     // Match runtime state
     this.flagHolderId = null;
+    this.pendingTossWinnerId = null;
     this.timeRemaining = this.matchConfig.ROUND_DURATION;
     this.countdownRemaining = this.matchConfig.COUNTDOWN_DURATION;
-    this.uninterruptedHoldTime = 0;
     this.activeContacts = new Set(); // Stores contact pairs "idA:idB" to prevent continuous overlap spam
     this.finalPenaltyApplied = false;
+
+    // Dynamic scoring phase state
+    this.phaseSchedule = [];
+    this.activePhase = null;
 
     // Simulation loop handles
     this.loopInterval = null;
@@ -47,7 +59,11 @@ export class GameRoom {
     this.countdownInterval = null;
 
     // Statistics for results
-    this.stats = new Map(); // socketId -> { passesMade: 0, timeHeld: 0, holdBonuses: 0 }
+    this.stats = new Map(); // socketId -> { passesMade: 0, timeHeld: 0 }
+  }
+
+  get effectiveSpeed() {
+    return this.baseSpeed;
   }
 
   // --- ROOM MANAGEMENT ---
@@ -88,14 +104,17 @@ export class GameRoom {
       vx: 0,
       vy: 0,
       inputX: 0,
-      inputY: 0,
+      jumpRequested: false,
+      dropDown: false,
+      isGrounded: true,
+      springCooldown: 0,
       score: 0,
       speedBoostTimer: 0,
       isConnected: true,
     };
 
     this.players.set(socketId, player);
-    this.stats.set(socketId, { passesMade: 0, timeHeld: 0, holdBonuses: 0 });
+    this.stats.set(socketId, { passesMade: 0, timeHeld: 0 });
 
     return { success: true, player };
   }
@@ -110,33 +129,34 @@ export class GameRoom {
     this.players.delete(socketId);
     this.stats.delete(socketId);
 
-    // Clean up contact pairs involving this player
-    for (const key of this.activeContacts) {
-      if (key.includes(socketId)) {
-        this.activeContacts.delete(key);
-      }
-    }
-
-    // If host left, elect new host
-    if (this.hostSocketId === socketId && this.players.size > 0) {
-      const nextHost = this.players.keys().next().value;
-      this.hostSocketId = nextHost;
-    }
-
-    // If flag holder left during active play, assign flag to another player
-    if (this.status === ROOM_STATUS.PLAYING && this.flagHolderId === socketId) {
+    // If flag holder left, transfer flag to another random player
+    if (this.flagHolderId === socketId) {
       this.flagHolderId = null;
-      this.uninterruptedHoldTime = 0;
-      if (this.players.size > 0) {
-        const remainingIds = Array.from(this.players.keys());
-        const randomNewHolder = remainingIds[Math.floor(Math.random() * remainingIds.length)];
-        this.setFlagHolder(randomNewHolder, 'disconnect_reassign');
-      } else {
-        this.endMatch();
+      const remainingIds = Array.from(this.players.keys());
+      if (remainingIds.length > 0 && this.status === ROOM_STATUS.PLAYING) {
+        const nextHolderId = remainingIds[Math.floor(Math.random() * remainingIds.length)];
+        this.setFlagHolder(nextHolderId, 'holder_left');
+        const nextHolder = this.players.get(nextHolderId);
+        this.emitToRoom(EVENTS.SERVER.FLAG_TRANSFERRED, {
+          fromId: null,
+          toId: nextHolderId,
+          passBonus: 0,
+          passerScore: 0,
+          x: nextHolder ? nextHolder.x : ARENA.WIDTH / 2,
+          y: nextHolder ? nextHolder.y : ARENA.HEIGHT / 2,
+        });
       }
     }
 
-    // If fewer than 2 players remain during playing/countdown, return to lobby
+    // Host migration
+    if (socketId === this.hostSocketId) {
+      const nextHost = this.players.keys().next().value;
+      if (nextHost) {
+        this.hostSocketId = nextHost;
+      }
+    }
+
+    // If not enough players remain, abort to lobby
     if (this.players.size < this.matchConfig.MIN_PLAYERS &&
        (this.status === ROOM_STATUS.PLAYING || this.status === ROOM_STATUS.COUNTDOWN)) {
       this.stopSimulation();
@@ -146,24 +166,21 @@ export class GameRoom {
   }
 
   /**
-   * Sets client movement input.
+   * Sets client movement input (horizontal, jump, and platform drop).
    */
-  handlePlayerInput(socketId, input) {
+  handlePlayerInput(socketId, input = {}) {
     const player = this.players.get(socketId);
     if (!player || this.status !== ROOM_STATUS.PLAYING) return;
 
     let ix = Number(input.x) || 0;
-    let iy = Number(input.y) || 0;
+    // Clamp horizontal input
+    player.inputX = Math.max(-1, Math.min(1, ix));
 
-    // Normalize diagonal input on the server so client cannot spoof super-speed
-    const len = Math.hypot(ix, iy);
-    if (len > 1) {
-      ix /= len;
-      iy /= len;
-    }
+    // Jump requested via explicit boolean or negative Y input
+    player.jumpRequested = Boolean(input.jump || (Number(input.y) < -0.5));
 
-    player.inputX = ix;
-    player.inputY = iy;
+    // Drop-down requested via explicit boolean or positive Y input
+    player.dropDown = Boolean(input.dropDown || (Number(input.y) > 0.5));
   }
 
   // --- MATCH LIFECYCLE ---
@@ -186,6 +203,9 @@ export class GameRoom {
     this.status = ROOM_STATUS.COUNTDOWN;
     this.countdownRemaining = this.matchConfig.COUNTDOWN_DURATION;
 
+    // Perform flag toss to decide initial holder
+    this.performToss();
+
     // Reset spawn positions
     let idx = 0;
     for (const player of this.players.values()) {
@@ -195,7 +215,10 @@ export class GameRoom {
       player.vx = 0;
       player.vy = 0;
       player.inputX = 0;
-      player.inputY = 0;
+      player.jumpRequested = false;
+      player.dropDown = false;
+      player.isGrounded = true;
+      player.springCooldown = 0;
       player.score = 0;
       player.speedBoostTimer = 0;
       idx++;
@@ -224,16 +247,91 @@ export class GameRoom {
    */
   resetMatchState() {
     this.flagHolderId = null;
+    this.pendingTossWinnerId = null;
     this.timeRemaining = this.matchConfig.ROUND_DURATION;
-    this.uninterruptedHoldTime = 0;
     this.activeContacts.clear();
     this.finalPenaltyApplied = false;
+    this.phaseSchedule = [];
+    this.activePhase = null;
 
-    for (const [id, stats] of this.stats.entries()) {
+    for (const stats of this.stats.values()) {
       stats.passesMade = 0;
       stats.timeHeld = 0;
-      stats.holdBonuses = 0;
     }
+  }
+
+  /**
+   * Performs an authoritative flag toss to select the initial flag holder.
+   */
+  performToss() {
+    const playerIds = Array.from(this.players.keys());
+    if (playerIds.length === 0) return null;
+
+    const winnerId = playerIds[Math.floor(Math.random() * playerIds.length)];
+    this.pendingTossWinnerId = winnerId;
+    const winner = this.players.get(winnerId);
+
+    const candidates = Array.from(this.players.values()).map(p => ({
+      id: p.id,
+      name: p.name,
+      color: p.color,
+    }));
+
+    const tossData = {
+      candidates,
+      winnerId,
+      winnerName: winner ? winner.name : 'Player',
+      winnerColor: winner?.color?.css || '#f59e0b',
+      startingBonus: this.scoringConfig.STARTING_BONUS,
+    };
+
+    this.emitToRoom(EVENTS.SERVER.FLAG_TOSS, tossData);
+    return tossData;
+  }
+
+  /**
+   * Schedules randomized scoring phases across the round duration.
+   */
+  scheduleScoringPhases() {
+    const duration = this.matchConfig.ROUND_DURATION;
+    const phaseDuration = PHASE_CONFIG.PHASE_DURATION;
+    const warningDuration = PHASE_CONFIG.WARNING_DURATION;
+    const minInterval = PHASE_CONFIG.MIN_INTERVAL;
+
+    this.phaseSchedule = [];
+    this.activePhase = null;
+
+    // Schedule 2 to 3 phases within the round, leaving margins at the start and end
+    const numPhases = Math.min(3, Math.max(2, Math.floor(duration / 40)));
+    const earliestStart = duration - 15;
+    const latestStart = 20;
+    const usableSpan = earliestStart - latestStart;
+    const segmentSpan = usableSpan / numPhases;
+
+    for (let i = 0; i < numPhases; i++) {
+      const segStart = earliestStart - i * segmentSpan;
+      const segEnd = segStart - segmentSpan + minInterval;
+
+      // Random start time within segment
+      const offset = Math.random() * Math.max(2, (segStart - segEnd) * 0.5);
+      const startTime = Math.round(segStart - offset);
+
+      // Random phase type
+      const type = PHASE_CONFIG.TYPES[Math.floor(Math.random() * PHASE_CONFIG.TYPES.length)];
+
+      this.phaseSchedule.push({
+        startTime,
+        duration: phaseDuration,
+        warningTime: startTime + warningDuration,
+        type,
+        warningEmitted: false,
+        started: false,
+        ended: false,
+      });
+    }
+
+    // Sort by startTime descending (as timeRemaining counts down)
+    this.phaseSchedule.sort((a, b) => b.startTime - a.startTime);
   }
 
   /**
@@ -244,34 +342,42 @@ export class GameRoom {
     this.timeRemaining = this.matchConfig.ROUND_DURATION;
     this.lastTickTime = Date.now();
 
-    // Random initial flag holder
-    const playerIds = Array.from(this.players.keys());
-    const initialHolderId = playerIds[Math.floor(Math.random() * playerIds.length)];
+    // Use toss winner if determined during countdown, or fallback to random
+    const initialHolderId = (this.pendingTossWinnerId && this.players.has(this.pendingTossWinnerId))
+      ? this.pendingTossWinnerId
+      : Array.from(this.players.keys())[0];
 
-    this.setFlagHolder(initialHolderId, 'initial_start');
+    this.pendingTossWinnerId = null;
 
-    // Award starting bonus (+30 points) to the initial holder
-    const initialHolder = this.players.get(initialHolderId);
-    if (initialHolder) {
-      initialHolder.score += this.scoringConfig.STARTING_BONUS;
+    if (initialHolderId) {
+      this.setFlagHolder(initialHolderId, 'round_start');
+      const initialHolder = this.players.get(initialHolderId);
+      if (initialHolder) {
+        initialHolder.score += this.scoringConfig.STARTING_BONUS;
+      }
     }
 
+    // Authoritatively schedule dynamic scoring phases
+    this.scheduleScoringPhases();
+
+    const initialHolder = this.players.get(this.flagHolderId);
     this.emitToRoom(EVENTS.SERVER.GAME_STARTED, {
       flagHolderId: this.flagHolderId,
       startingBonus: this.scoringConfig.STARTING_BONUS,
-      timeRemaining: this.timeRemaining,
+      tossWinnerName: initialHolder?.name || 'Player',
+      effectiveSpeed: this.effectiveSpeed,
     });
 
     this.startSimulation();
+    this.broadcastRoomState();
   }
 
   /**
-   * Starts the authoritative physics and scoring loop.
+   * Starts the 30 Hz simulation loop.
    */
   startSimulation() {
     this.stopSimulation();
-    const tickMs = 1000 / this.matchConfig.TICK_RATE;
-    this.lastTickTime = Date.now();
+    const tickMs = 1000 / MATCH_CONFIG.TICK_RATE;
 
     this.loopInterval = setInterval(() => {
       this.tick();
@@ -299,7 +405,7 @@ export class GameRoom {
     if (this.status !== ROOM_STATUS.PLAYING) return;
 
     const now = Date.now();
-    const dt = Math.min((now - this.lastTickTime) / 1000, 0.1); // clamp dt to prevent giant physics jumps
+    const dt = Math.min((now - this.lastTickTime) / 1000, 0.05); // clamp dt to 50ms max to prevent tunneling
     this.lastTickTime = now;
 
     // 1. Update Match Timer
@@ -310,97 +416,215 @@ export class GameRoom {
       return;
     }
 
-    // 2. Update Continuous Scoring and Hold Timer
+    // 2. Check and Update Dynamic Scoring Phases
+    this.updateScoringPhases();
+
+    // 3. Update Continuous Scoring
     this.updateScoring(dt);
 
-    // 3. Update Player Positions with Physics & Obstacle Collisions
+    // 4. Update Player Positions with Platform Gravity, Jumping & Springs
     this.updatePlayerMovement(dt);
 
-    // 4. Resolve Player-to-Player Collisions & Flag Transfers
+    // 5. Resolve Player-to-Player Collisions & Flag Transfers
     this.updateCollisionsAndTransfers();
 
-    // 5. Broadcast Snapshot
+    // 6. Broadcast Snapshot
     this.broadcastSnapshot();
   }
 
   /**
-   * Central Scoring update tick.
-   * - Flag holder: -2 pts/sec
-   * - Non-holders: +1 pt/sec
-   * - 5-sec continuous hold bonus: +8 pts
+   * Checks phase schedule and broadcasts warnings, start, and end events.
    */
-  updateScoring(dt) {
-    for (const [id, player] of this.players.entries()) {
-      if (id === this.flagHolderId) {
-        // Holder loses points
-        player.score += this.scoringConfig.HOLDER_POINTS_PER_SEC * dt;
+  updateScoringPhases() {
+    for (const phase of this.phaseSchedule) {
+      // 5-second advance warning
+      if (this.timeRemaining <= phase.warningTime && !phase.warningEmitted) {
+        phase.warningEmitted = true;
+        this.emitToRoom(EVENTS.SERVER.PHASE_WARNING, {
+          phaseId: phase.type.id,
+          name: phase.type.name,
+          description: phase.type.description,
+          countdown: 5,
+        });
+      }
 
-        // Track stats
-        const stat = this.stats.get(id);
-        if (stat) stat.timeHeld += dt;
+      // Phase activation
+      if (this.timeRemaining <= phase.startTime && !phase.started) {
+        phase.started = true;
+        this.activePhase = phase.type;
+        this.emitToRoom(EVENTS.SERVER.PHASE_STARTED, {
+          phaseId: phase.type.id,
+          name: phase.type.name,
+          description: phase.type.description,
+          duration: phase.duration,
+        });
+      }
 
-        // Uninterrupted hold bonus tracking
-        this.uninterruptedHoldTime += dt;
-        if (this.uninterruptedHoldTime >= this.scoringConfig.HOLD_BONUS_INTERVAL) {
-          // Award hold bonus!
-          player.score += this.scoringConfig.HOLD_BONUS_POINTS;
-          if (stat) stat.holdBonuses++;
-
-          // Reset uninterrupted timer to count the next 5-second interval
-          this.uninterruptedHoldTime -= this.scoringConfig.HOLD_BONUS_INTERVAL;
-
-          this.emitToRoom(EVENTS.SERVER.HOLD_BONUS_AWARDED, {
-            playerId: id,
-            bonus: this.scoringConfig.HOLD_BONUS_POINTS,
-            newScore: Math.round(player.score),
-          });
+      // Phase termination
+      if (this.timeRemaining <= (phase.startTime - phase.duration) && phase.started && !phase.ended) {
+        phase.ended = true;
+        if (this.activePhase?.id === phase.type.id) {
+          this.activePhase = null;
         }
-      } else {
-        // Non-holders gain points
-        player.score += this.scoringConfig.NON_HOLDER_POINTS_PER_SEC * dt;
+        this.emitToRoom(EVENTS.SERVER.PHASE_ENDED, {
+          phaseId: phase.type.id,
+        });
       }
     }
   }
 
   /**
-   * Updates player movement, speed boosts, and wall/obstacle collisions.
+   * Central Scoring update tick.
+   * - Flag holder: -2 pts/sec (multiplied during Flag Frenzy)
+   * - Non-holders: +1 pt/sec (multiplied during Double Survival)
+   * (Fixed 5-sec hold bonus removed in favor of dynamic scoring phases)
    */
-  updatePlayerMovement(dt) {
-    for (const player of this.players.values()) {
-      // Handle speed boost countdown
-      let speed = PLAYER_CONFIG.BASE_SPEED;
-      if (player.speedBoostTimer > 0) {
-        player.speedBoostTimer -= dt;
-        speed = PLAYER_CONFIG.PASS_BOOST_SPEED;
-      }
+  updateScoring(dt) {
+    let holderRate = this.scoringConfig.HOLDER_POINTS_PER_SEC;
+    let nonHolderRate = this.scoringConfig.NON_HOLDER_POINTS_PER_SEC;
 
-      // Calculate target velocity
-      player.vx = player.inputX * speed;
-      player.vy = player.inputY * speed;
-
-      // New candidate position
-      const newX = player.x + player.vx * dt;
-      const newY = player.y + player.vy * dt;
-
-      // Authoritative collision resolution against arena bounds and obstacles
-      const resolved = resolveAllObstacles(newX, newY, PLAYER_CONFIG.RADIUS);
-      player.x = resolved.x;
-      player.y = resolved.y;
+    if (this.activePhase?.holderMultiplier) {
+      holderRate *= this.activePhase.holderMultiplier;
+    }
+    if (this.activePhase?.nonHolderMultiplier) {
+      nonHolderRate *= this.activePhase.nonHolderMultiplier;
     }
 
-    // Soft player-to-player collision resolution so players don't penetrate
-    resolvePlayerCollisions(Object.fromEntries(this.players), PLAYER_CONFIG.RADIUS);
+    for (const [id, player] of this.players.entries()) {
+      if (id === this.flagHolderId) {
+        player.score += holderRate * dt;
+        const stat = this.stats.get(id);
+        if (stat) stat.timeHeld += dt;
+      } else {
+        player.score += nonHolderRate * dt;
+      }
+    }
+  }
+
+  /**
+   * Updates player vertical physics (gravity, jumping, spring pads, platform landing) and horizontal movement.
+   */
+  updatePlayerMovement(dt) {
+    const currentBaseSpeed = this.baseSpeed;
+    const boostRatio = this.playerConfig.PASS_BOOST_SPEED / this.playerConfig.BASE_SPEED;
+    const currentBoostSpeed = Math.round(currentBaseSpeed * boostRatio);
+
+    for (const player of this.players.values()) {
+      // Cooldown decrement for spring launchers
+      if (player.springCooldown > 0) {
+        player.springCooldown -= dt;
+      }
+
+      // 1. Horizontal movement
+      let speed = currentBaseSpeed;
+      if (player.speedBoostTimer > 0) {
+        player.speedBoostTimer -= dt;
+        speed = currentBoostSpeed;
+      }
+      player.vx = player.inputX * speed;
+
+      // 2. Gravitational acceleration
+      player.vy = Math.min(PHYSICS_CONFIG.TERMINAL_VELOCITY, player.vy + PHYSICS_CONFIG.GRAVITY * dt);
+
+      // 3. Jump execution (allowed only when grounded)
+      if (player.jumpRequested && player.isGrounded) {
+        player.vy = PHYSICS_CONFIG.JUMP_VELOCITY;
+        player.isGrounded = false;
+        player.jumpRequested = false;
+      }
+
+      // Swept coordinates
+      const prevX = player.x;
+      const prevY = player.y;
+      let newX = prevX + player.vx * dt;
+      let newY = prevY + player.vy * dt;
+
+      // 4. Spring Pad / Tyre Launcher Collision Check (launches player upward)
+      let springTriggered = null;
+      if (player.springCooldown <= 0) {
+        springTriggered = checkSpringPadCollision(prevY, newY, newX, PLAYER_CONFIG.RADIUS, SPRINGS);
+        if (springTriggered) {
+          player.vy = springTriggered.impulse;
+          player.isGrounded = false;
+          player.springCooldown = PHYSICS_CONFIG.COOLDOWN_AFTER_BOUNCE;
+          this.emitToRoom(EVENTS.SERVER.SPRING_TRIGGERED, {
+            springId: springTriggered.id,
+            playerId: player.id,
+            impulse: springTriggered.impulse,
+          });
+        }
+      }
+
+      let groundedThisFrame = false;
+
+      // 5. One-Way Platform Landing (only when falling downward and not dropping down)
+      if (!springTriggered && player.vy >= 0 && !player.dropDown) {
+        for (const plat of PLATFORMS) {
+          if (checkPlatformLanding(prevY, newY, newX, PLAYER_CONFIG.RADIUS, plat)) {
+            newY = plat.y - PLAYER_CONFIG.RADIUS;
+            player.vy = 0;
+            groundedThisFrame = true;
+            break;
+          }
+        }
+      }
+
+      // 6. Arena Boundary Clamping (Walls, Ceiling, Ground Floor)
+      const minX = ARENA.WALL_THICKNESS + PLAYER_CONFIG.RADIUS;
+      const maxX = ARENA.WIDTH - ARENA.WALL_THICKNESS - PLAYER_CONFIG.RADIUS;
+      newX = Math.max(minX, Math.min(maxX, newX));
+
+      const ceilingY = ARENA.WALL_THICKNESS + PLAYER_CONFIG.RADIUS;
+      if (newY <= ceilingY) {
+        newY = ceilingY;
+        if (player.vy < 0) player.vy = 0;
+      }
+
+      const floorY = ARENA.GROUND_Y - PLAYER_CONFIG.RADIUS;
+      if (newY >= floorY) {
+        newY = floorY;
+        player.vy = 0;
+        groundedThisFrame = true;
+      }
+
+      player.x = newX;
+      player.y = newY;
+      player.isGrounded = groundedThisFrame;
+
+      // Check if player is standing on a spring pad (for walking detection)
+      // This catches the case when walking horizontally onto a spring
+      if (groundedThisFrame && player.springCooldown <= 0 && !springTriggered) {
+        for (const spring of SPRINGS) {
+          const springCenterX = spring.x + spring.width / 2;
+          const springLeft = spring.x - PLAYER_CONFIG.RADIUS;
+          const springRight = spring.x + spring.width + PLAYER_CONFIG.RADIUS;
+          const springTop = spring.y;
+          const springBottom = spring.y + spring.height;
+          const playerFeet = newY + PLAYER_CONFIG.RADIUS;
+
+          // Check if player's center X is over the spring horizontally
+          // and feet are near/touching the spring surface
+          if (newX >= springLeft && newX <= springRight &&
+              playerFeet >= springTop - 5 && playerFeet <= springBottom + 10) {
+            player.vy = spring.impulse;
+            player.isGrounded = false;
+            player.springCooldown = PHYSICS_CONFIG.COOLDOWN_AFTER_BOUNCE;
+            this.emitToRoom(EVENTS.SERVER.SPRING_TRIGGERED, {
+              springId: spring.id,
+              playerId: player.id,
+              impulse: spring.impulse,
+            });
+            break;
+          }
+        }
+      }
+    }
+
+    // Players pass through each other like ghosts - no collision blocking
   }
 
   /**
    * Core Flag Transfer & Contact Resolution.
-   *
-   * Rules enforced:
-   * - Single flag in the match.
-   * - ZERO cooldown: fresh contact transfers IMMEDIATELY.
-   * - Active contact pair tracking: a single continuous contact does not spam duplicate transfers.
-   * - Instant re-transfer on separation and re-touching.
-   * - Transfer to a 3rd player while touching 1st player works immediately.
    */
   updateCollisionsAndTransfers() {
     const playerList = Array.from(this.players.values());
@@ -419,11 +643,9 @@ export class GameRoom {
         );
 
         if (isTouching) {
-          // Stable pair key: order IDs alphabetically
           const pairKey = p1.id < p2.id ? `${p1.id}:${p2.id}` : `${p2.id}:${p1.id}`;
           currentFrameContacts.add(pairKey);
 
-          // Check if either player is the flag holder
           const p1IsHolder = p1.id === this.flagHolderId;
           const p2IsHolder = p2.id === this.flagHolderId;
 
@@ -431,9 +653,10 @@ export class GameRoom {
             const holder = p1IsHolder ? p1 : p2;
             const target = p1IsHolder ? p2 : p1;
 
-            // If this contact pair was NOT already active in the previous tick:
-            // This is a FRESH contact -> Transfer flag IMMEDIATELY!
-            if (!this.activeContacts.has(pairKey)) {
+            // Only transfer on NEW contact (first touch), never during continuous contact
+            const isNewContact = !this.activeContacts.has(pairKey);
+
+            if (isNewContact) {
               this.executeFlagTransfer(holder, target, pairKey);
             }
           }
@@ -441,7 +664,6 @@ export class GameRoom {
       }
     }
 
-    // Update active contacts set: pairs that separated are removed, re-arming fresh contact!
     this.activeContacts = currentFrameContacts;
   }
 
@@ -452,30 +674,32 @@ export class GameRoom {
     const previousHolderId = passer.id;
     const newHolderId = receiver.id;
 
-    // 1. Award pass bonus to passer
-    passer.score += this.scoringConfig.PASS_BONUS;
+    // 1. Award pass bonus (with active scoring phase multiplier if present)
+    let passBonus = this.scoringConfig.PASS_BONUS;
+    if (this.activePhase?.passBonusMultiplier) {
+      passBonus = Math.round(passBonus * this.activePhase.passBonusMultiplier);
+    }
+
+    passer.score += passBonus;
     const passerStat = this.stats.get(passer.id);
     if (passerStat) passerStat.passesMade++;
 
-    // 2. Passer speed burst to escape (if active-play incentive enabled)
+    // 2. Passer speed burst to escape
     if (this.scoringConfig.SPEED_BOOST_ON_PASS) {
       passer.speedBoostTimer = PLAYER_CONFIG.PASS_BOOST_DURATION;
     }
 
-    // 3. Reset uninterrupted hold timer
-    this.uninterruptedHoldTime = 0;
-
-    // 4. Update flag ownership
+    // 3. Update flag ownership
     this.setFlagHolder(newHolderId, 'pass');
 
-    // 5. Mark contact pair as active so continuous overlap does not re-transfer back
-    this.activeContacts.add(pairKey);
+    // 4. Mark contact pair as active
+    if (pairKey) this.activeContacts.add(pairKey);
 
-    // 6. Broadcast event immediately for snappy client sound/particle effects
+    // 5. Broadcast event
     this.emitToRoom(EVENTS.SERVER.FLAG_TRANSFERRED, {
       fromId: previousHolderId,
       toId: newHolderId,
-      passBonus: this.scoringConfig.PASS_BONUS,
+      passBonus,
       passerScore: Math.round(passer.score),
       x: (passer.x + receiver.x) / 2,
       y: (passer.y + receiver.y) / 2,
@@ -485,9 +709,8 @@ export class GameRoom {
   /**
    * Sets the authoritative flag holder.
    */
-  setFlagHolder(socketId, reason = 'unknown') {
+  setFlagHolder(socketId) {
     this.flagHolderId = socketId;
-    this.uninterruptedHoldTime = 0;
   }
 
   /**
@@ -496,6 +719,8 @@ export class GameRoom {
   endMatch() {
     this.status = ROOM_STATUS.ENDED;
     this.stopSimulation();
+    this.activePhase = null;
+    this.phaseSchedule = [];
 
     // Apply end-of-round penalty to the final flag holder exactly once (-40 points)
     if (!this.finalPenaltyApplied && this.flagHolderId) {
@@ -517,7 +742,6 @@ export class GameRoom {
           finalScore: Math.round(p.score),
           passesMade: stat.passesMade || 0,
           timeHeld: Math.round(stat.timeHeld || 0),
-          holdBonuses: stat.holdBonuses || 0,
           wasFinalHolder: p.id === this.flagHolderId,
         };
       })
@@ -559,10 +783,60 @@ export class GameRoom {
     return { success: true };
   }
 
+  /**
+   * Updates room speed from host or client request.
+   * REJECTS changes if match is currently active (only available in lobby or after round).
+   */
+  handleSpeedChange(socketId, data = {}) {
+    // 1. Strict status check: Settings must ONLY be changeable in the lobby or after match
+    if (this.status !== ROOM_STATUS.LOBBY && this.status !== ROOM_STATUS.ENDED) {
+      return {
+        success: false,
+        reason: 'Game settings can only be changed before the round starts in the lobby.',
+      };
+    }
+
+    // 2. Only host can change speed when multiple players are in the room
+    if (this.players.size > 1 && socketId !== this.hostSocketId) {
+      return { success: false, reason: 'Only the room host (👑) can change game speed.' };
+    }
+
+    let newSpeed = this.baseSpeed;
+    let newMult = this.speedMultiplier;
+
+    if (typeof data.delta === 'number') {
+      newSpeed = Math.max(200, Math.min(900, Math.round(newSpeed + data.delta)));
+      newMult = Math.round((newSpeed / this.playerConfig.BASE_SPEED) * 100) / 100;
+    } else if (typeof data.speed === 'number') {
+      newSpeed = Math.max(200, Math.min(900, Math.round(data.speed)));
+      newMult = Math.round((newSpeed / this.playerConfig.BASE_SPEED) * 100) / 100;
+    } else if (typeof data.multiplier === 'number') {
+      newMult = Math.max(0.5, Math.min(2.5, Math.round(data.multiplier * 100) / 100));
+      newSpeed = Math.round(this.playerConfig.BASE_SPEED * newMult);
+    }
+
+    this.baseSpeed = newSpeed;
+    this.speedMultiplier = newMult;
+
+    const effectiveSpeed = this.baseSpeed;
+    const changer = this.players.get(socketId);
+
+    const payload = {
+      baseSpeed: this.baseSpeed,
+      speedMultiplier: this.speedMultiplier,
+      effectiveSpeed,
+      changedBy: changer ? changer.name : 'Host',
+    };
+
+    this.emitToRoom(EVENTS.SERVER.SPEED_UPDATED, payload);
+    return { success: true, ...payload };
+  }
+
   // --- NETWORKING BROADCASTS ---
 
   /**
    * Broadcasts the light, high-frequency game snapshot (30 Hz).
+   * Includes grounded state and vertical velocity for client platform rendering.
    */
   broadcastSnapshot() {
     const snapshot = {
@@ -574,6 +848,7 @@ export class GameRoom {
         y: Math.round(p.y * 10) / 10,
         vx: Math.round(p.vx),
         vy: Math.round(p.vy),
+        g: p.isGrounded,
         s: Math.round(p.score),
         b: p.speedBoostTimer > 0,
       })),
@@ -596,7 +871,12 @@ export class GameRoom {
       hostId: this.hostSocketId,
       status: this.status,
       timeRemaining: Math.round(this.timeRemaining),
+      roundDuration: this.matchConfig.ROUND_DURATION,
+      baseSpeed: this.baseSpeed,
+      speedMultiplier: this.speedMultiplier,
+      effectiveSpeed: this.baseSpeed,
       flagHolderId: this.flagHolderId,
+      activePhase: this.activePhase,
       players: Array.from(this.players.values()).map(p => ({
         id: p.id,
         name: p.name,
