@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>FLAG-TAG | 2D Online Multiplayer Arena</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./src/style.css" />
+</head>
+<body>
+  <!-- Phaser 3 Game Container -->
+  <div id="game-container"></div>
+
+  <!-- Audio Toggle & Latency HUD (Always Available in top-right) -->
+  <div id="top-bar">
+    <div id="connection-badge" class="badge">
+      <span class="status-dot"></span>
+      <span id="ping-text">Connecting...</span>
+    </div>
+    <button id="sound-toggle-btn" class="icon-btn" title="Toggle Sound">🔊</button>
+  </div>
+
+  <!-- Notification Toast Container -->
+  <div id="toast-container"></div>
+
+  <!-- SCREEN 1: MAIN MENU -->
+  <div id="main-menu" class="screen-overlay active">
+    <div class="menu-card glass-panel">
+      <div class="brand">
+        <div class="brand-badge">⚡ ONLINE MULTIPLAYER</div>
+        <h1 class="game-title">FLAG<span class="accent-text">TAG</span></h1>
+        <p class="tagline">Hot-potato tag arena. Hold it, pass it, score big, don't get stuck with it!</p>
+      </div>
+
+      <div class="form-group">
+        <label for="player-name-input">Your Nickname</label>
+        <input type="text" id="player-name-input" maxlength="16" placeholder="Enter nickname..." autofocus />
+      </div>
+
+      <div class="menu-actions">
+        <button id="create-room-btn" class="btn btn-primary btn-large">
+          <span class="btn-icon">⚡</span> Create Private Room
+        </button>
+
+        <div class="divider"><span>OR JOIN WITH CODE</span></div>
+
+        <div class="join-row">
+          <input type="text" id="join-code-input" maxlength="5" placeholder="CODE" />
+          <button id="join-room-btn" class="btn btn-secondary">
+            Join
+          </button>
+        </div>
+      </div>
+
+      <!-- Quick Rules & Controls -->
+      <div class="menu-info-grid">
+        <div class="info-box">
+          <h4>🎮 Controls</h4>
+          <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or <kbd>↑</kbd><kbd>←</kbd><kbd>↓</kbd><kbd>→</kbd></p>
+          <small>Touch / Virtual Joystick on mobile</small>
+        </div>
+        <div class="info-box">
+          <h4>🏆 Scoring Rules</h4>
+          <ul>
+            <li>🚩 Starting Holder: <strong>+30 pts</strong></li>
+            <li>⏱ Non-holders: <strong>+1 pt/s</strong> | Holder: <strong>-2 pts/s</strong></li>
+            <li>⭐ 5s Hold Bonus: <strong>+8 pts</strong></li>
+            <li>🤝 Successful Pass: <strong>+5 pts</strong></li>
+            <li>💥 Holding at 0s: <strong>-40 pts</strong></li>
+          </ul>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SCREEN 2: ROOM LOBBY -->
+  <div id="lobby-screen" class="screen-overlay">
+    <div class="lobby-card glass-panel">
+      <div class="lobby-header">
+        <div>
+          <span class="badge badge-subtle">PRIVATE ROOM</span>
+          <div class="room-code-display">
+            <span class="label">ROOM CODE:</span>
+            <span id="lobby-room-code" class="code-text">-----</span>
+          </div>
+        </div>
+        <button id="copy-invite-btn" class="btn btn-secondary btn-sm">
+          📋 Copy Invite Link
+        </button>
+      </div>
+
+      <div class="lobby-body">
+        <div class="player-roster-header">
+          <h3>Players in Arena (<span id="player-count">1</span>/8)</h3>
+          <span class="hint-text">Minimum 2 players required to start</span>
+        </div>
+
+        <div id="lobby-player-list" class="player-grid">
+          <!-- Dynamically populated -->
+        </div>
+      </div>
+
+      <div class="lobby-footer">
+        <button id="leave-room-btn" class="btn btn-outline">
+          Leave Room
+        </button>
+
+        <div class="host-controls">
+          <div id="waiting-notice" class="waiting-text">Waiting for host to start...</div>
+          <button id="start-game-btn" class="btn btn-primary btn-large hidden">
+            🚀 Start Match
+          </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SCREEN 3: IN-GAME HUD -->
+  <div id="in-game-hud" class="hud-overlay hidden">
+    <!-- Top Center Timer & Flag Status -->
+    <div class="hud-center">
+      <div id="hud-timer-card" class="hud-card">
+        <span class="hud-timer-label">TIME</span>
+        <span id="hud-timer" class="hud-timer-value">90</span>
+      </div>
+
+      <div id="hud-flag-card" class="hud-card">
+        <span class="hud-flag-icon">🚩</span>
+        <span id="hud-flag-text">Flag Holder: <strong>None</strong></span>
+      </div>
+    </div>
+
+    <!-- Live Scoreboard (Top Left) -->
+    <div id="hud-scoreboard" class="hud-card scoreboard-card">
+      <div class="scoreboard-title">LEADERBOARD</div>
+      <div id="scoreboard-list" class="scoreboard-entries">
+        <!-- Live rows -->
+      </div>
+    </div>
+
+    <!-- On-screen big countdown (3.. 2.. 1.. GO!) -->
+    <div id="countdown-banner" class="countdown-overlay hidden">
+      <span id="countdown-number">3</span>
+    </div>
+
+    <!-- Mobile Virtual Joystick Container -->
+    <div id="virtual-joystick-zone" class="joystick-zone">
+      <div id="joystick-base" class="joystick-base">
+        <div id="joystick-thumb" class="joystick-thumb"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- SCREEN 4: RESULTS SCREEN -->
+  <div id="results-screen" class="screen-overlay">
+    <div class="results-card glass-panel">
+      <div class="results-header">
+        <div class="winner-trophy">🏆</div>
+        <h2 id="winner-announcement">ROUND OVER!</h2>
+        <p id="winner-subtitle" class="winner-sub">The dust has settled.</p>
+      </div>
+
+      <div class="rankings-table-container">
+        <table class="rankings-table">
+          <thead>
+            <tr>
+              <th>#</th>
+              <th>Player</th>
+              <th>Passes</th>
+              <th>Time Held</th>
+              <th>Score</th>
+            </tr>
+          </thead>
+          <tbody id="rankings-body">
+            <!-- Dynamically populated -->
+          </tbody>
+        </table>
+      </div>
+
+      <div class="results-actions">
+        <button id="results-rematch-btn" class="btn btn-primary btn-large hidden">
+          🔄 Rematch
+        </button>
+        <button id="results-lobby-btn" class="btn btn-secondary">
+          🏠 Return to Lobby
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Script entry -->
+  <script type="module" src="./src/main.js"></script>
+</body>
+</html>

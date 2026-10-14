@@ -1,0 +1,27 @@
+{
+  "name": "flag-tag-arena-game",
+  "version": "1.0.0",
+  "description": "2D Online Multiplayer Flag-Tag Arena Game with Phaser 3, Node.js, and Socket.IO",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "install:all": "npm install && npm install --prefix server && npm install --prefix client",
+    "test": "npm test --prefix server",
+    "build": "npm run build --prefix client",
+    "start": "npm start --prefix server",
+    "server:dev": "npm run dev --prefix server",
+    "client:dev": "npm run dev --prefix client",
+    "dev": "node -e \"const { spawn } = require('child_process'); spawn('npm', ['run', 'dev', '--prefix', 'server'], { stdio: 'inherit', shell: true }); spawn('npm', ['run', 'dev', '--prefix', 'client'], { stdio: 'inherit', shell: true });\""
+  },
+  "keywords": [
+    "phaser3",
+    "socketio",
+    "multiplayer",
+    "tag",
+    "game",
+    "nodejs",
+    "realtime"
+  ],
+  "author": "",
+  "license": "MIT"
+}
