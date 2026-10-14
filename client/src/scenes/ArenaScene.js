@@ -562,8 +562,19 @@ export class ArenaScene extends Phaser.Scene {
     for (const [id, visual] of this.playersMap.entries()) {
       const serverP = this.serverPlayerStates.get(id);
       if (serverP) {
-        visual.container.x = Phaser.Math.Linear(visual.container.x, serverP.x, lerpFactor);
-        visual.container.y = Phaser.Math.Linear(visual.container.y, serverP.y, lerpFactor);
+        // For the local player, snap to server position to prevent desync/floating
+        const isLocalPlayer = (id === this.myId);
+
+        if (isLocalPlayer) {
+          // Directly apply server position with minimal smoothing
+          visual.container.x = serverP.x;
+          visual.container.y = serverP.y;
+        } else {
+          // Smooth interpolation for remote players
+          visual.container.x = Phaser.Math.Linear(visual.container.x, serverP.x, lerpFactor);
+          visual.container.y = Phaser.Math.Linear(visual.container.y, serverP.y, lerpFactor);
+        }
+
         visual.scoreText.setText(serverP.s);
 
         // Orient eyes toward velocity
