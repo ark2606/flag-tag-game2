@@ -595,17 +595,15 @@ export class GameRoom {
       // This catches the case when walking horizontally onto a spring
       if (groundedThisFrame && player.springCooldown <= 0 && !springTriggered) {
         for (const spring of SPRINGS) {
-          const springCenterX = spring.x + spring.width / 2;
-          const springLeft = spring.x - PLAYER_CONFIG.RADIUS;
-          const springRight = spring.x + spring.width + PLAYER_CONFIG.RADIUS;
+          const springLeft = spring.x - PLAYER_CONFIG.RADIUS * 0.3;
+          const springRight = spring.x + spring.width + PLAYER_CONFIG.RADIUS * 0.3;
           const springTop = spring.y;
-          const springBottom = spring.y + spring.height;
           const playerFeet = newY + PLAYER_CONFIG.RADIUS;
 
-          // Check if player's center X is over the spring horizontally
-          // and feet are near/touching the spring surface
+          // Only trigger if player's horizontal center is over the spring
+          // AND feet are within 3px of the spring top (very precise)
           if (newX >= springLeft && newX <= springRight &&
-              playerFeet >= springTop - 5 && playerFeet <= springBottom + 10) {
+              Math.abs(playerFeet - springTop) <= 3) {
             player.vy = spring.impulse;
             player.isGrounded = false;
             player.springCooldown = PHYSICS_CONFIG.COOLDOWN_AFTER_BOUNCE;

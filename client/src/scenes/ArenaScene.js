@@ -59,6 +59,19 @@ export class ArenaScene extends Phaser.Scene {
     });
     this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
 
+    // Prevent arrow keys and space from scrolling the page
+    this.input.keyboard.addCapture([
+      Phaser.Input.Keyboard.KeyCodes.UP,
+      Phaser.Input.Keyboard.KeyCodes.DOWN,
+      Phaser.Input.Keyboard.KeyCodes.LEFT,
+      Phaser.Input.Keyboard.KeyCodes.RIGHT,
+      Phaser.Input.Keyboard.KeyCodes.SPACE,
+      Phaser.Input.Keyboard.KeyCodes.W,
+      Phaser.Input.Keyboard.KeyCodes.A,
+      Phaser.Input.Keyboard.KeyCodes.S,
+      Phaser.Input.Keyboard.KeyCodes.D,
+    ]);
+
     // 6. Setup Responsive Full-Viewport Camera
     this.cameras.main.setBounds(-200, -200, ARENA.WIDTH + 400, ARENA.HEIGHT + 400);
     this.fitCameraToScreen();
