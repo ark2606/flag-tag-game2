@@ -654,4 +654,51 @@ test('24. Scoring phase cleanup on match completion and reset', () => {
   assert.equal(room.phaseSchedule.length, 0);
 });
 
+test('25. Player left broadcast notification to remaining players', () => {
+  const io = createMockIO();
+  const room = new GameRoom('ROOM1', 'p1', io);
+  room.addPlayer('p1', 'Alice');
+  room.addPlayer('p2', 'Bob');
+  room.addPlayer('p3', 'Charlie');
+
+  // p3 leaves
+  const res = room.removePlayer('p3');
+  assert.equal(res.leavingName, 'Charlie');
+  assert.equal(res.remainingCount, 2);
+
+  const leftEvent = io.emittedEvents.find(e => e.event === EVENTS.SERVER.PLAYER_LEFT && e.payload.name === 'Charlie');
+  assert.ok(leftEvent, 'Must emit PLAYER_LEFT event when player leaves');
+  assert.equal(leftEvent.payload.remainingPlayers, 2);
+  assert.equal(leftEvent.payload.leftAlone, false);
+});
+
+test('26. Player left alone ends active match with GAME OVER and left_alone event', () => {
+  const io = createMockIO();
+  const room = new GameRoom('ROOM1', 'p1', io);
+  room.addPlayer('p1', 'Alice');
+  room.addPlayer('p2', 'Bob');
+  room.startMatch();
+  assert.equal(room.status, ROOM_STATUS.PLAYING);
+
+  // Bob leaves while match is running, leaving Alice alone
+  room.removePlayer('p2');
+
+  assert.equal(room.players.size, 1);
+  assert.equal(room.status, ROOM_STATUS.ENDED, 'Match must end when player is left alone');
+
+  const leftEvent = io.emittedEvents.find(e => e.event === EVENTS.SERVER.PLAYER_LEFT && e.payload.name === 'Bob');
+  assert.ok(leftEvent);
+  assert.equal(leftEvent.payload.leftAlone, true);
+  assert.equal(leftEvent.payload.remainingPlayers, 1);
+
+  const gameEndedEvent = io.emittedEvents.find(e => e.event === EVENTS.SERVER.GAME_ENDED);
+  assert.ok(gameEndedEvent);
+  assert.equal(gameEndedEvent.payload.reason, 'all_players_left');
+  assert.equal(gameEndedEvent.payload.message, 'Everyone has left the room!');
+
+  const aloneEvent = io.emittedEvents.find(e => e.event === EVENTS.SERVER.LEFT_ALONE);
+  assert.ok(aloneEvent);
+  assert.equal(aloneEvent.payload.message, 'Everyone has left the room!');
+});
+
 

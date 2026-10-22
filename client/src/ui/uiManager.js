@@ -61,8 +61,21 @@ export class UIManager {
     this.phaseTitle = document.getElementById('phase-title');
     this.phaseDescription = document.getElementById('phase-description');
 
-    // Mobile controls
+    // Mobile controls & Fullscreen
     this.mobileJumpBtn = document.getElementById('mobile-jump-btn');
+    this.mobileDropBtn = document.getElementById('mobile-drop-btn');
+    this.fullscreenBtn = document.getElementById('fullscreen-btn');
+    this.rotateOverlay = document.getElementById('rotate-device-overlay');
+    this.rotateFullscreenBtn = document.getElementById('rotate-fullscreen-btn');
+    this.rotateLeaveBtn = document.getElementById('rotate-leave-btn');
+
+    // Game Over Alone modal
+    this.gameOverAloneOverlay = document.getElementById('game-over-alone-overlay');
+    this.aloneMessageText = document.getElementById('alone-message-text');
+    this.aloneBackLobbyBtn = document.getElementById('alone-back-lobby-btn');
+    this.aloneMenuBtn = document.getElementById('alone-menu-btn');
+    this.onLeaveRoomRequest = null;
+    this.onReturnToLobbyRequest = null;
 
     // Flag Toss animation overlay (triggered on match start)
     this.tossOverlay = document.getElementById('toss-overlay');
@@ -209,6 +222,147 @@ export class UIManager {
         }
       });
     }
+    // Fullscreen / Landscape toggle button
+    if (this.fullscreenBtn) {
+      this.fullscreenBtn.addEventListener('click', () => {
+        this.toggleFullscreen();
+      });
+      document.addEventListener('fullscreenchange', () => {
+        const isFs = !!document.fullscreenElement;
+        this.fullscreenBtn.textContent = isFs ? '🗗' : '⛶';
+      });
+    }
+
+    // Orientation detection & rotate overlay
+    this.setupOrientationDetection();
+  }
+
+  async toggleFullscreen() {
+    try {
+      if (!document.fullscreenElement) {
+        const docEl = document.documentElement;
+        if (docEl.requestFullscreen) {
+          await docEl.requestFullscreen();
+        } else if (docEl.webkitRequestFullscreen) {
+          await docEl.webkitRequestFullscreen();
+        }
+        if (screen.orientation && screen.orientation.lock) {
+          try {
+            await screen.orientation.lock('landscape');
+          } catch (e) {
+            // lock may not be allowed without system permission or on iOS
+          }
+        }
+      } else {
+        if (document.exitFullscreen) {
+          await document.exitFullscreen();
+        } else if (document.webkitExitFullscreen) {
+          await document.webkitExitFullscreen();
+        }
+      }
+    } catch (e) {
+      // Ignored
+    }
+  }
+
+  isPortrait() {
+    return window.innerHeight > window.innerWidth;
+  }
+
+  showRotateOverlay(force = true) {
+    if (this.rotateOverlay) {
+      this.rotateOverlay.classList.remove('hidden');
+    }
+  }
+
+  hideRotateOverlay() {
+    if (this.rotateOverlay) {
+      this.rotateOverlay.classList.add('hidden');
+    }
+  }
+
+  showGameOverAlone(customMessage) {
+    if (this.inGameHud) this.inGameHud.classList.add('hidden');
+    if (this.countdownBanner) this.countdownBanner.classList.add('hidden');
+
+    if (this.gameOverAloneOverlay) {
+      if (customMessage && this.aloneMessageText) {
+        this.aloneMessageText.textContent = customMessage;
+      }
+      this.gameOverAloneOverlay.classList.remove('hidden');
+      this.gameOverAloneOverlay.classList.add('active');
+    }
+    soundSynth.playGameOver();
+  }
+
+  hideGameOverAlone() {
+    if (this.gameOverAloneOverlay) {
+      this.gameOverAloneOverlay.classList.add('hidden');
+      this.gameOverAloneOverlay.classList.remove('active');
+    }
+  }
+
+  setupOrientationDetection() {
+    if (this.rotateLeaveBtn) {
+      this.rotateLeaveBtn.addEventListener('click', () => {
+        this.hideRotateOverlay();
+        if (typeof this.onLeaveRoomRequest === 'function') {
+          this.onLeaveRoomRequest();
+        } else {
+          this.showScreen('menu');
+        }
+      });
+    }
+
+    if (this.aloneBackLobbyBtn) {
+      this.aloneBackLobbyBtn.addEventListener('click', () => {
+        this.hideGameOverAlone();
+        if (typeof this.onReturnToLobbyRequest === 'function') {
+          this.onReturnToLobbyRequest();
+        } else {
+          this.showScreen('lobby');
+          this.unlockSettings();
+          this.hidePhaseActive();
+        }
+      });
+    }
+
+    if (this.aloneMenuBtn) {
+      this.aloneMenuBtn.addEventListener('click', () => {
+        this.hideGameOverAlone();
+        if (typeof this.onLeaveRoomRequest === 'function') {
+          this.onLeaveRoomRequest();
+        } else {
+          this.showScreen('menu');
+        }
+      });
+    }
+
+    if (this.rotateFullscreenBtn) {
+      this.rotateFullscreenBtn.addEventListener('click', async () => {
+        await this.toggleFullscreen();
+      });
+    }
+
+    const checkOrientation = () => {
+      const isPortrait = this.isPortrait();
+      const isTouch = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
+
+      // When in touch environment or mobile emulation in portrait mode
+      if (isPortrait && isTouch) {
+        this.showRotateOverlay();
+      } else if (!isPortrait) {
+        this.hideRotateOverlay();
+      }
+    };
+
+    window.addEventListener('resize', checkOrientation);
+    window.addEventListener('orientationchange', checkOrientation);
+    if (screen.orientation) {
+      screen.orientation.addEventListener('change', checkOrientation);
+    }
+
+    setTimeout(checkOrientation, 150);
   }
 
   getPlayerName() {
@@ -221,6 +375,7 @@ export class UIManager {
     [this.mainMenu, this.lobbyScreen, this.resultsScreen].forEach((el) => {
       if (el) el.classList.remove('active');
     });
+    this.hideGameOverAlone();
 
     if (screenName === 'menu' && this.mainMenu) {
       this.mainMenu.classList.add('active');

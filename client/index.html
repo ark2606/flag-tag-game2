@@ -73,6 +73,7 @@
           <input type="range" id="volume-slider" min="0" max="100" value="70" class="volume-slider" title="Master Volume" />
         </div>
         <button id="sound-toggle-btn" class="icon-btn" title="Toggle Mute">🔊</button>
+        <button id="fullscreen-btn" class="icon-btn" title="Toggle Landscape Fullscreen">⛶</button>
       </div>
     </div>
   </header>
@@ -85,11 +86,6 @@
     <div id="phase-title" class="phase-title">🔥 BONUS PHASE</div>
     <div id="phase-description" class="phase-description">Special scoring active!</div>
   </div>
-
-  <!-- Mobile Jump Button (on-screen touch control) -->
-  <button id="mobile-jump-btn" class="mobile-jump-btn" aria-label="Jump">
-    <span class="jump-icon">⬆</span>
-  </button>
 
   <!-- Notification Toast Container -->
   <div id="toast-container"></div>
@@ -247,11 +243,23 @@
       <span id="countdown-number">3</span>
     </div>
 
-    <!-- Mobile Virtual Joystick Container -->
+    <!-- Mobile Virtual Joystick Container (Left Side) -->
     <div id="virtual-joystick-zone" class="joystick-zone">
       <div id="joystick-base" class="joystick-base">
         <div id="joystick-thumb" class="joystick-thumb"></div>
       </div>
+    </div>
+
+    <!-- Mobile Action Buttons (Right Side: Jump & Drop Down) -->
+    <div id="mobile-action-buttons" class="mobile-actions-zone">
+      <button id="mobile-drop-btn" class="mobile-action-btn mobile-drop-btn" aria-label="Drop Down through platform" title="Drop Down">
+        <span class="btn-icon-glyph">⬇</span>
+        <span class="btn-label-text">DROP</span>
+      </button>
+      <button id="mobile-jump-btn" class="mobile-action-btn mobile-jump-btn" aria-label="Jump" title="Jump">
+        <span class="btn-icon-glyph">⬆</span>
+        <span class="btn-label-text">JUMP</span>
+      </button>
     </div>
   </div>
 
@@ -287,6 +295,52 @@
         </button>
         <button id="results-lobby-btn" class="btn btn-secondary">
           🏠 Return to Lobby
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ROTATE DEVICE OVERLAY (Shown when mobile device is held in portrait mode) -->
+  <div id="rotate-device-overlay" class="rotate-overlay hidden">
+    <div class="rotate-card glass-panel">
+      <div class="rotate-phone-animation">
+        <div class="phone-body">
+          <div class="phone-screen">
+            <span class="phone-game-icon">🚩</span>
+          </div>
+        </div>
+        <div class="rotate-arrow">↻</div>
+      </div>
+      <h2 class="rotate-title">Rotate to Landscape</h2>
+      <p class="rotate-desc">
+        FLAG-TAG is built for landscape view for the best arena overview and controls, just like playing on a laptop screen!
+      </p>
+      <div class="rotate-actions">
+        <button id="rotate-fullscreen-btn" class="btn btn-primary btn-large">
+          <span class="btn-icon">⛶</span> Landscape Fullscreen
+        </button>
+        <button id="rotate-leave-btn" class="btn btn-outline btn-sm">
+          🚪 Leave Room
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- SCREEN 5: GAME OVER - ALL PLAYERS LEFT -->
+  <div id="game-over-alone-overlay" class="screen-overlay hidden">
+    <div class="results-card glass-panel alone-card">
+      <div class="winner-trophy alone-icon">🚪🏃💨</div>
+      <h2 class="alone-title">GAME OVER</h2>
+      <h3 id="alone-message-text" class="alone-subtitle">Everyone has left the room!</h3>
+      <p class="alone-desc">
+        All other players have left or disconnected from the match. You are the last player remaining in this room.
+      </p>
+      <div class="results-actions">
+        <button id="alone-back-lobby-btn" class="btn btn-primary btn-large">
+          🏠 Return to Lobby
+        </button>
+        <button id="alone-menu-btn" class="btn btn-secondary">
+          🚪 Main Menu
         </button>
       </div>
     </div>

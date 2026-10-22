@@ -21,16 +21,23 @@ export class VirtualJoystick {
   initTouchListeners() {
     if (!this.zone || !this.thumb) return;
 
-    // Detect touch support
-    const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-    if (isTouchDevice) {
-      this.zone.style.display = 'block';
-    }
+    // Show joystick on touch devices or when mobile viewport is simulated in devtools
+    const checkVisibility = () => {
+      const isTouch = 'ontouchstart' in window || (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
+      const isMobileLayout = window.innerHeight <= 600 || window.innerWidth <= 1024;
+      if (isTouch || isMobileLayout) {
+        this.zone.style.display = 'block';
+      }
+    };
+    checkVisibility();
+    window.addEventListener('resize', checkVisibility);
+    window.addEventListener('orientationchange', checkVisibility);
 
     const onStart = (e) => {
+      if (e.cancelable) e.preventDefault();
       const touch = e.changedTouches ? e.changedTouches[0] : e;
       this.active = true;
-      this.touchId = touch.identifier;
+      this.touchId = touch.identifier !== undefined ? touch.identifier : null;
 
       const rect = this.base.getBoundingClientRect();
       this.startX = rect.left + rect.width / 2;
@@ -41,6 +48,7 @@ export class VirtualJoystick {
 
     const onMove = (e) => {
       if (!this.active) return;
+      if (e.cancelable) e.preventDefault();
       let touch = null;
       if (e.changedTouches) {
         for (let i = 0; i < e.changedTouches.length; i++) {
@@ -60,6 +68,21 @@ export class VirtualJoystick {
 
     const onEnd = (e) => {
       if (!this.active) return;
+      // If this was a touch event, only end if the released touch matches this joystick's touchId!
+      if (e.changedTouches && this.touchId !== null) {
+        let matching = false;
+        for (let i = 0; i < e.changedTouches.length; i++) {
+          if (e.changedTouches[i].identifier === this.touchId) {
+            matching = true;
+            break;
+          }
+        }
+        if (!matching) {
+          // Another finger ended (e.g. Jump button release) - do NOT interrupt joystick movement!
+          return;
+        }
+      }
+
       this.active = false;
       this.touchId = null;
       this.vector = { x: 0, y: 0 };
@@ -71,7 +94,7 @@ export class VirtualJoystick {
     window.addEventListener('touchend', onEnd, { passive: false });
     window.addEventListener('touchcancel', onEnd, { passive: false });
 
-    // Also support mouse dragging on the joystick for testing in devtools
+    // Also support mouse dragging on the joystick for testing in browser devtools
     this.zone.addEventListener('mousedown', onStart);
     window.addEventListener('mousemove', onMove);
     window.addEventListener('mouseup', onEnd);

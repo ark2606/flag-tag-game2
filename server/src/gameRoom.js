@@ -124,8 +124,9 @@ export class GameRoom {
    */
   removePlayer(socketId) {
     const player = this.players.get(socketId);
-    if (!player) return;
+    if (!player) return null;
 
+    const leavingName = player.name;
     this.players.delete(socketId);
     this.stats.delete(socketId);
 
@@ -156,13 +157,29 @@ export class GameRoom {
       }
     }
 
-    // If not enough players remain, abort to lobby
-    if (this.players.size < this.matchConfig.MIN_PLAYERS &&
+    // Notify remaining players in room about the player who left
+    this.emitToRoom(EVENTS.SERVER.PLAYER_LEFT, {
+      socketId,
+      name: leavingName,
+      remainingPlayers: this.players.size,
+      leftAlone: this.players.size === 1,
+    });
+
+    // If only 1 player remains during active match or countdown, trigger GAME OVER because everyone else left
+    if (this.players.size === 1 &&
+       (this.status === ROOM_STATUS.PLAYING || this.status === ROOM_STATUS.COUNTDOWN)) {
+      this.endMatch('all_players_left');
+      this.emitToRoom(EVENTS.SERVER.LEFT_ALONE, {
+        message: 'Everyone has left the room!',
+      });
+    } else if (this.players.size < this.matchConfig.MIN_PLAYERS &&
        (this.status === ROOM_STATUS.PLAYING || this.status === ROOM_STATUS.COUNTDOWN)) {
       this.stopSimulation();
       this.status = ROOM_STATUS.LOBBY;
       this.broadcastRoomState();
     }
+
+    return { leavingName, remainingCount: this.players.size };
   }
 
   /**
@@ -712,16 +729,17 @@ export class GameRoom {
   }
 
   /**
-   * Match ends when countdown timer hits 0.
+   * Match ends when countdown timer hits 0 or all other players leave.
    */
-  endMatch() {
+  endMatch(reason = null) {
     this.status = ROOM_STATUS.ENDED;
     this.stopSimulation();
     this.activePhase = null;
     this.phaseSchedule = [];
 
     // Apply end-of-round penalty to the final flag holder exactly once (-40 points)
-    if (!this.finalPenaltyApplied && this.flagHolderId) {
+    // Only applied if match completed normally, not when aborted due to players leaving
+    if (!this.finalPenaltyApplied && this.flagHolderId && reason !== 'all_players_left') {
       const finalHolder = this.players.get(this.flagHolderId);
       if (finalHolder) {
         finalHolder.score += this.scoringConfig.FINAL_HOLDER_PENALTY;
@@ -752,6 +770,8 @@ export class GameRoom {
       winner,
       finalHolderId: this.flagHolderId,
       finalPenalty: this.scoringConfig.FINAL_HOLDER_PENALTY,
+      reason,
+      message: reason === 'all_players_left' ? 'Everyone has left the room!' : null,
     });
 
     this.broadcastRoomState();

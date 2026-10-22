@@ -200,6 +200,8 @@ export const EVENTS = {
     ROOM_JOINED: 'room:joined',
     ROOM_STATE: 'room:state',
     ROOM_ERROR: 'room:error',
+    PLAYER_LEFT: 'room:player_left',
+    LEFT_ALONE: 'room:left_alone',
     COUNTDOWN_TICK: 'game:countdown',
     GAME_STARTED: 'game:started',
     GAME_SNAPSHOT: 'game:snapshot',

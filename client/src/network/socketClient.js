@@ -15,7 +15,7 @@ export class SocketClient {
     // 3. Or localhost:3001 default for local dev
     const envUrl = import.meta.env.VITE_SERVER_URL;
     const defaultUrl = window.location.port === '3000'
-      ? 'http://localhost:3001'
+      ? `http://${window.location.hostname}:3001`
       : window.location.origin;
 
     this.serverUrl = envUrl || defaultUrl;

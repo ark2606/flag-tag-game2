@@ -25,15 +25,16 @@ export class ArenaScene extends Phaser.Scene {
     this.wasd = null;
     this.spaceKey = null;
     this.mobileJumpPressed = false;
+    this.mobileDropPressed = false;
     this.lastSentInput = { x: 0, jump: false, dropDown: false };
     this.inputSendTimer = 0;
   }
 
-  init(data) {
-    this.socketClient = data.socketClient;
-    this.virtualJoystick = data.virtualJoystick;
-    this.uiManager = data.uiManager;
-    this.myId = data.myId;
+  init(data = {}) {
+    if (data.socketClient) this.socketClient = data.socketClient;
+    if (data.virtualJoystick) this.virtualJoystick = data.virtualJoystick;
+    if (data.uiManager) this.uiManager = data.uiManager;
+    if (data.myId !== undefined) this.myId = data.myId;
   }
 
   create() {
@@ -72,52 +73,95 @@ export class ArenaScene extends Phaser.Scene {
       Phaser.Input.Keyboard.KeyCodes.D,
     ]);
 
-    // 6. Setup Responsive Full-Viewport Camera
-    this.cameras.main.setBounds(-200, -200, ARENA.WIDTH + 400, ARENA.HEIGHT + 400);
+    // 6. Setup Responsive Full-Viewport Camera (Unbounded so centerOn is pixel-exact without clamp displacement)
+    this.cameras.main.useBounds = false;
     this.fitCameraToScreen();
     this.scale.on('resize', this.fitCameraToScreen, this);
+
+    // Re-fit on window resize, DevTools device toggle, and mobile orientation change
+    const handleViewportChange = () => {
+      this.scale.refresh();
+      this.fitCameraToScreen();
+      setTimeout(() => {
+        this.scale.refresh();
+        this.fitCameraToScreen();
+      }, 100);
+      setTimeout(() => {
+        this.scale.refresh();
+        this.fitCameraToScreen();
+      }, 350);
+    };
+
+    window.addEventListener('resize', handleViewportChange);
+    window.addEventListener('orientationchange', handleViewportChange);
+    if (screen.orientation) {
+      screen.orientation.addEventListener('change', handleViewportChange);
+    }
 
     // 7. Hook Network Events
     this.setupNetworkHooks();
 
-    // 8. Bind Mobile Jump Button if present in DOM
+    // 8. Bind Mobile Jump and Drop Buttons if present in DOM
     const mobileJumpBtn = document.getElementById('mobile-jump-btn');
     if (mobileJumpBtn) {
-      mobileJumpBtn.addEventListener('pointerdown', (e) => {
-        e.preventDefault();
+      const setJump = (e) => {
+        if (e.cancelable) e.preventDefault();
         this.mobileJumpPressed = true;
-      });
-      const clearJump = () => { this.mobileJumpPressed = false; };
+      };
+      const clearJump = (e) => {
+        if (e.cancelable) e.preventDefault();
+        this.mobileJumpPressed = false;
+      };
+      mobileJumpBtn.addEventListener('pointerdown', setJump);
       mobileJumpBtn.addEventListener('pointerup', clearJump);
       mobileJumpBtn.addEventListener('pointercancel', clearJump);
       mobileJumpBtn.addEventListener('pointerleave', clearJump);
+    }
+
+    const mobileDropBtn = document.getElementById('mobile-drop-btn');
+    if (mobileDropBtn) {
+      const setDrop = (e) => {
+        if (e.cancelable) e.preventDefault();
+        this.mobileDropPressed = true;
+      };
+      const clearDrop = (e) => {
+        if (e.cancelable) e.preventDefault();
+        this.mobileDropPressed = false;
+      };
+      mobileDropBtn.addEventListener('pointerdown', setDrop);
+      mobileDropBtn.addEventListener('pointerup', clearDrop);
+      mobileDropBtn.addEventListener('pointercancel', clearDrop);
+      mobileDropBtn.addEventListener('pointerleave', clearDrop);
     }
   }
 
   fitCameraToScreen() {
     const width = this.scale.width;
     const height = this.scale.height;
+    if (!width || !height) return;
 
-    // Direct aspect-fill zoom so the playable arena occupies 100% of the screen
-    // Zero empty margins on any screen width or aspect ratio!
-    const zoomX = width / ARENA.WIDTH;
-    const zoomY = height / ARENA.HEIGHT;
+    // Uniform aspect-ratio scaling: preserves exact geometry without stretching
+    // Fits the arena into the available screen, centered like on a laptop!
+    const zoom = Math.min(width / ARENA.WIDTH, height / ARENA.HEIGHT);
 
-    this.cameras.main.setZoom(zoomX, zoomY);
+    this.cameras.main.useBounds = false;
+    this.cameras.main.setZoom(zoom);
     this.cameras.main.centerOn(ARENA.WIDTH / 2, ARENA.HEIGHT / 2);
   }
 
   drawSceneryBackground() {
-    // 1. Atmospheric Sky Backdrop (covers wide and tall displays)
+    // 1. Atmospheric Sky Backdrop (covers ultra-wide landscape and varied aspect ratios)
     const bg = this.add.graphics();
     bg.fillGradientStyle(0x070b14, 0x070b14, 0x1e1b4b, 0x0f172a, 1);
-    bg.fillRect(-400, -400, ARENA.WIDTH + 800, ARENA.HEIGHT + 800);
+    bg.fillRect(-1200, -800, ARENA.WIDTH + 2400, ARENA.HEIGHT + 1600);
 
     // 2. Distant mountain silhouettes
     const mountains = this.add.graphics();
     mountains.fillStyle(0x0f172a, 0.7);
     mountains.beginPath();
-    mountains.moveTo(-200, 940);
+    mountains.moveTo(-1200, 940);
+    mountains.lineTo(-600, 520);
+    mountains.lineTo(-200, 800);
     mountains.lineTo(100, 480);
     mountains.lineTo(350, 700);
     mountains.lineTo(600, 380);
@@ -125,28 +169,33 @@ export class ArenaScene extends Phaser.Scene {
     mountains.lineTo(1200, 420);
     mountains.lineTo(1500, 720);
     mountains.lineTo(1800, 500);
-    mountains.lineTo(1900, 940);
+    mountains.lineTo(2200, 680);
+    mountains.lineTo(ARENA.WIDTH + 1200, 940);
     mountains.closePath();
     mountains.fillPath();
 
     // Midground hills
     mountains.fillStyle(0x131f37, 0.85);
     mountains.beginPath();
-    mountains.moveTo(-200, 940);
+    mountains.moveTo(-1200, 940);
+    mountains.lineTo(-500, 680);
+    mountains.lineTo(-200, 850);
     mountains.lineTo(250, 620);
     mountains.lineTo(500, 800);
     mountains.lineTo(800, 560);
     mountains.lineTo(1100, 780);
     mountains.lineTo(1450, 600);
-    mountains.lineTo(1900, 940);
+    mountains.lineTo(1800, 780);
+    mountains.lineTo(2100, 640);
+    mountains.lineTo(ARENA.WIDTH + 1200, 940);
     mountains.closePath();
     mountains.fillPath();
 
-    // Starfield specks
+    // Starfield specks across expanded arena sky
     const stars = this.add.graphics();
     stars.fillStyle(0xffffff, 0.6);
-    for (let i = 0; i < 90; i++) {
-      const sx = (i * 179 + 43) % ARENA.WIDTH;
+    for (let i = 0; i < 140; i++) {
+      const sx = ((i * 179 + 43) % (ARENA.WIDTH + 1200)) - 600;
       const sy = (i * 83 + 27) % 550;
       stars.fillCircle(sx, sy, (i % 3 === 0) ? 1.5 : 1);
     }
@@ -321,6 +370,11 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   setupNetworkHooks() {
+    if (!this.socketClient) {
+      console.warn('ArenaScene: socketClient is not ready yet');
+      return;
+    }
+
     // 1. Snapshot state
     this.socketClient.on(EVENTS.SERVER.GAME_SNAPSHOT, (snap) => {
       this.handleSnapshot(snap);
@@ -644,8 +698,8 @@ export class ArenaScene extends Phaser.Scene {
       jump = true;
     }
 
-    // Drop down through platform: S or Down Arrow
-    if (this.cursors.down.isDown || this.wasd.down.isDown) {
+    // Drop down through platform: S, Down Arrow, or mobile drop button
+    if (this.cursors.down.isDown || this.wasd.down.isDown || this.mobileDropPressed) {
       dropDown = true;
     }
 
@@ -653,11 +707,14 @@ export class ArenaScene extends Phaser.Scene {
     if (this.virtualJoystick) {
       const joy = this.virtualJoystick.getInput();
       if (Math.abs(joy.x) > 0.05) {
-        ix = joy.x;
+        const sign = Math.sign(joy.x);
+        const mag = Math.abs(joy.x);
+        // Responsive curve: easy to hit top speed on mobile without extreme edge stretching
+        ix = sign * Math.min(1, mag > 0.6 ? 1 : mag * 1.3);
       }
-      if (joy.y < -0.6) {
+      if (joy.y < -0.55) {
         jump = true;
-      } else if (joy.y > 0.6) {
+      } else if (joy.y > 0.55) {
         dropDown = true;
       }
     }

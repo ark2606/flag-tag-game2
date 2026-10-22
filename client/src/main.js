@@ -21,6 +21,8 @@ class GameApp {
     this.myId = null;
     this.currentRoomState = null;
     this.phaserGame = null;
+    this.pendingStartOnLandscape = false;
+    window.__gameApp = this;
 
     this.init();
   }
@@ -30,25 +32,43 @@ class GameApp {
     const config = {
       type: Phaser.AUTO,
       parent: 'game-container',
-      width: window.innerWidth,
-      height: window.innerHeight,
       backgroundColor: '#090d16',
       scale: {
         mode: Phaser.Scale.RESIZE,
-        autoCenter: Phaser.Scale.CENTER_BOTH,
+        autoCenter: Phaser.Scale.NO_CENTER,
       },
-      scene: [ArenaScene],
+      render: {
+        antialias: true,
+      },
+      scene: null, // Add scene explicitly with data to avoid empty auto-boot race conditions
     };
 
     this.phaserGame = new Phaser.Game(config);
 
-    // Pass dependencies to ArenaScene once created
-    this.phaserGame.scene.start('ArenaScene', {
+    // Pass dependencies directly to ArenaScene upon creation
+    this.phaserGame.scene.add('ArenaScene', ArenaScene, true, {
       socketClient: this.network,
       virtualJoystick: this.joystick,
       uiManager: this.ui,
       myId: null,
     });
+
+    // Ensure mobile on-screen controls are visible when testing mobile/device layout on PC or real devices
+    const updateMobileControlsVisibility = () => {
+      const isTouch = 'ontouchstart' in window || (navigator.maxTouchPoints && navigator.maxTouchPoints > 0);
+      const isMobileSize = window.innerHeight <= 600 || window.innerWidth <= 1024;
+      const joystickZone = document.getElementById('virtual-joystick-zone');
+      const mobileActions = document.getElementById('mobile-action-buttons');
+      if (joystickZone && mobileActions) {
+        if (isTouch || isMobileSize) {
+          joystickZone.style.display = 'block';
+          mobileActions.style.display = 'flex';
+        }
+      }
+    };
+    updateMobileControlsVisibility();
+    window.addEventListener('resize', updateMobileControlsVisibility);
+    window.addEventListener('orientationchange', updateMobileControlsVisibility);
 
     // 2. Connect to Multiplayer WebSocket Server
     this.network.connect();
@@ -121,6 +141,10 @@ class GameApp {
     this.network.on(EVENTS.SERVER.COUNTDOWN_TICK, (data) => {
       this.ui.showScreen('game');
       this.ui.showCountdown(data.count);
+      // If player is in portrait, ensure rotate overlay is displayed
+      if (this.ui.isPortrait()) {
+        this.ui.showRotateOverlay();
+      }
       // Lock settings once countdown begins
       if (data.count === 3) {
         this.ui.lockSettings();
@@ -130,12 +154,34 @@ class GameApp {
     this.network.on(EVENTS.SERVER.GAME_STARTED, () => {
       this.ui.showScreen('game');
       this.ui.showCountdown(0); // GO!
+      if (this.ui.isPortrait()) {
+        this.ui.showRotateOverlay();
+      }
       this.ui.lockSettings();
+    });
+
+    this.network.on(EVENTS.SERVER.PLAYER_LEFT, (data) => {
+      this.ui.showToast(`🚪 ${data.name || 'A player'} has left the room.`, 'warning');
+      if (data.leftAlone || data.remainingPlayers === 1) {
+        if (this.currentRoomState?.status === ROOM_STATUS.PLAYING || this.currentRoomState?.status === ROOM_STATUS.COUNTDOWN) {
+          this.ui.showGameOverAlone('Everyone has left the room!');
+        } else if (this.currentRoomState?.status === ROOM_STATUS.LOBBY) {
+          this.ui.showToast('👤 Everyone else has left the room. You are now alone.', 'error');
+        }
+      }
+    });
+
+    this.network.on(EVENTS.SERVER.LEFT_ALONE, (data) => {
+      this.ui.showGameOverAlone(data?.message || 'Everyone has left the room!');
     });
 
     this.network.on(EVENTS.SERVER.GAME_ENDED, (data) => {
       const isHost = this.currentRoomState?.hostId === this.myId;
-      this.ui.showResults(data, isHost);
+      if (data?.reason === 'all_players_left') {
+        this.ui.showGameOverAlone(data.message || 'Everyone has left the room!');
+      } else {
+        this.ui.showResults(data, isHost);
+      }
       this.ui.unlockSettings();
       this.ui.hidePhaseActive();
     });
@@ -194,14 +240,52 @@ class GameApp {
 
     // Leave Room
     this.ui.leaveRoomBtn.addEventListener('click', () => {
+      this.pendingStartOnLandscape = false;
       this.network.leaveRoom();
       this.ui.showScreen('menu');
     });
 
-    // Start Game (Host only)
+    // Handle Leave Room from Game Over Alone / Rotate overlay
+    this.ui.onLeaveRoomRequest = () => {
+      this.pendingStartOnLandscape = false;
+      this.network.leaveRoom();
+      this.ui.showScreen('menu');
+    };
+
+    // Handle Return to Lobby from Game Over Alone
+    this.ui.onReturnToLobbyRequest = () => {
+      this.pendingStartOnLandscape = false;
+      this.network.returnToLobby();
+      this.ui.showScreen('lobby');
+      this.ui.unlockSettings();
+      this.ui.hidePhaseActive();
+    };
+
+    // Start Game (Host only) - only start if in landscape, otherwise block until landscape
     this.ui.startGameBtn.addEventListener('click', () => {
+      if (this.ui.isPortrait()) {
+        this.pendingStartOnLandscape = true;
+        this.ui.showToast('📱 Please rotate to landscape orientation to start the game!', 'warning');
+        this.ui.showRotateOverlay(true);
+        return;
+      }
+      this.pendingStartOnLandscape = false;
       this.network.startGame();
     });
+
+    // Auto-start once landscape is detected if host clicked start while in portrait
+    const checkLandscapeStart = () => {
+      if (!this.ui.isPortrait() && this.pendingStartOnLandscape) {
+        this.pendingStartOnLandscape = false;
+        this.ui.showToast('✅ Landscape detected! Starting match...', 'bonus');
+        this.network.startGame();
+      }
+    };
+    window.addEventListener('resize', checkLandscapeStart);
+    window.addEventListener('orientationchange', checkLandscapeStart);
+    if (screen.orientation) {
+      screen.orientation.addEventListener('change', checkLandscapeStart);
+    }
 
     // Rematch (Host only)
     this.ui.resultsRematchBtn.addEventListener('click', () => {
