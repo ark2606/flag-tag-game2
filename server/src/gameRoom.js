@@ -862,6 +862,8 @@ export class GameRoom {
       f: this.flagHolderId,
       p: Array.from(this.players.values()).map(p => ({
         id: p.id,
+        name: p.name,
+        colorHex: p.color?.hex,
         x: Math.round(p.x * 10) / 10,
         y: Math.round(p.y * 10) / 10,
         vx: Math.round(p.vx),

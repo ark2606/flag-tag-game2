@@ -27,18 +27,40 @@ class GameApp {
     this.init();
   }
 
+  resizeGame() {
+    const container = document.getElementById('game-container');
+    if (!container || !this.phaserGame || !this.phaserGame.scale) return;
+
+    // High-DPI / Device Pixel Ratio scaling for crystal clear graphics on mobile & retina displays
+    const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+    const rect = container.getBoundingClientRect();
+    const cssWidth = Math.round(rect.width || window.innerWidth);
+    const cssHeight = Math.round(rect.height || (window.innerHeight - 40));
+    if (cssWidth <= 0 || cssHeight <= 0) return;
+
+    this.phaserGame.scale.setZoom(1 / dpr);
+    this.phaserGame.scale.resize(Math.round(cssWidth * dpr), Math.round(cssHeight * dpr));
+
+    const scene = this.phaserGame.scene.getScene('ArenaScene');
+    if (scene && typeof scene.fitCameraToScreen === 'function') {
+      scene.fitCameraToScreen();
+    }
+  }
+
   init() {
-    // 1. Initialize Phaser 3 Game
+    // 1. Initialize Phaser 3 Game with crisp High-DPI canvas configuration
     const config = {
       type: Phaser.AUTO,
       parent: 'game-container',
       backgroundColor: '#090d16',
       scale: {
-        mode: Phaser.Scale.RESIZE,
+        mode: Phaser.Scale.NONE,
         autoCenter: Phaser.Scale.NO_CENTER,
       },
       render: {
         antialias: true,
+        antialiasGL: true,
+        roundPixels: false,
       },
       scene: null, // Add scene explicitly with data to avoid empty auto-boot race conditions
     };
@@ -67,8 +89,22 @@ class GameApp {
       }
     };
     updateMobileControlsVisibility();
-    window.addEventListener('resize', updateMobileControlsVisibility);
-    window.addEventListener('orientationchange', updateMobileControlsVisibility);
+
+    const handleResize = () => {
+      this.resizeGame();
+      updateMobileControlsVisibility();
+    };
+
+    window.addEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', handleResize);
+    if (screen.orientation) {
+      screen.orientation.addEventListener('change', handleResize);
+    }
+
+    // Schedule initial layout sizing passes as DOM components settle
+    setTimeout(() => this.resizeGame(), 50);
+    setTimeout(() => this.resizeGame(), 200);
+    setTimeout(() => this.resizeGame(), 500);
 
     // 2. Connect to Multiplayer WebSocket Server
     this.network.connect();

@@ -701,4 +701,28 @@ test('26. Player left alone ends active match with GAME OVER and left_alone even
   assert.equal(aloneEvent.payload.message, 'Everyone has left the room!');
 });
 
+test('27. Snapshot broadcast contains authoritative player names and colors for client avatars and HUD', () => {
+  const io = createMockIO();
+  const room = new GameRoom('SNAP1', 'p1', io);
+  room.addPlayer('p1', 'AliceMaster');
+  room.addPlayer('p2', 'BobRunner');
+
+  room.broadcastSnapshot();
+
+  const snapEvent = io.emittedEvents.find(e => e.event === EVENTS.SERVER.GAME_SNAPSHOT);
+  assert.ok(snapEvent, 'GAME_SNAPSHOT event must be emitted');
+  assert.equal(snapEvent.payload.p.length, 2);
+
+  const p1Snap = snapEvent.payload.p.find(p => p.id === 'p1');
+  const p2Snap = snapEvent.payload.p.find(p => p.id === 'p2');
+
+  assert.ok(p1Snap);
+  assert.equal(p1Snap.name, 'AliceMaster');
+  assert.ok(typeof p1Snap.colorHex === 'number');
+
+  assert.ok(p2Snap);
+  assert.equal(p2Snap.name, 'BobRunner');
+  assert.ok(typeof p2Snap.colorHex === 'number');
+});
+
 

@@ -60,18 +60,39 @@ export class ArenaScene extends Phaser.Scene {
     });
     this.spaceKey = this.input.keyboard.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
 
-    // Prevent arrow keys and space from scrolling the page
+    // Prevent arrow keys from scrolling the page during active gameplay.
+    // NEVER capture letter keys (W, A, S, D) or Space globally so users can freely type in HTML inputs!
     this.input.keyboard.addCapture([
       Phaser.Input.Keyboard.KeyCodes.UP,
       Phaser.Input.Keyboard.KeyCodes.DOWN,
       Phaser.Input.Keyboard.KeyCodes.LEFT,
       Phaser.Input.Keyboard.KeyCodes.RIGHT,
-      Phaser.Input.Keyboard.KeyCodes.SPACE,
-      Phaser.Input.Keyboard.KeyCodes.W,
-      Phaser.Input.Keyboard.KeyCodes.A,
-      Phaser.Input.Keyboard.KeyCodes.S,
-      Phaser.Input.Keyboard.KeyCodes.D,
     ]);
+
+    // When typing in text inputs (e.g. nickname, room code), disable Phaser keyboard capture completely
+    const isTextInput = (target) => {
+      if (!target) return false;
+      const tag = target.tagName ? target.tagName.toUpperCase() : '';
+      return tag === 'INPUT' || tag === 'TEXTAREA' || target.isContentEditable;
+    };
+
+    window.addEventListener('focusin', (e) => {
+      if (isTextInput(e.target) && this.input?.keyboard) {
+        this.input.keyboard.enabled = false;
+        if (this.input.keyboard.manager) {
+          this.input.keyboard.manager.enabled = false;
+        }
+      }
+    }, true);
+
+    window.addEventListener('focusout', (e) => {
+      if (isTextInput(e.target) && this.input?.keyboard) {
+        this.input.keyboard.enabled = true;
+        if (this.input.keyboard.manager) {
+          this.input.keyboard.manager.enabled = true;
+        }
+      }
+    }, true);
 
     // 6. Setup Responsive Full-Viewport Camera (Unbounded so centerOn is pixel-exact without clamp displacement)
     this.cameras.main.useBounds = false;
@@ -80,15 +101,30 @@ export class ArenaScene extends Phaser.Scene {
 
     // Re-fit on window resize, DevTools device toggle, and mobile orientation change
     const handleViewportChange = () => {
-      this.scale.refresh();
-      this.fitCameraToScreen();
-      setTimeout(() => {
+      const app = window.__gameApp;
+      if (app && typeof app.resizeGame === 'function') {
+        app.resizeGame();
+      } else {
         this.scale.refresh();
         this.fitCameraToScreen();
+      }
+      setTimeout(() => {
+        const a = window.__gameApp;
+        if (a && typeof a.resizeGame === 'function') {
+          a.resizeGame();
+        } else {
+          this.scale.refresh();
+          this.fitCameraToScreen();
+        }
       }, 100);
       setTimeout(() => {
-        this.scale.refresh();
-        this.fitCameraToScreen();
+        const a = window.__gameApp;
+        if (a && typeof a.resizeGame === 'function') {
+          a.resizeGame();
+        } else {
+          this.scale.refresh();
+          this.fitCameraToScreen();
+        }
       }, 350);
     };
 
@@ -437,8 +473,14 @@ export class ArenaScene extends Phaser.Scene {
       activeIds.add(serverP.id);
       this.serverPlayerStates.set(serverP.id, serverP);
 
-      if (!this.playersMap.has(serverP.id)) {
+      let visual = this.playersMap.get(serverP.id);
+      if (!visual) {
         this.createPlayerVisual(serverP);
+      } else if (serverP.name && visual.name !== serverP.name) {
+        visual.name = serverP.name;
+        if (visual.nameText) {
+          visual.nameText.setText(serverP.name);
+        }
       }
     });
 
@@ -467,6 +509,8 @@ export class ArenaScene extends Phaser.Scene {
     const holderVisual = this.playersMap.get(this.flagHolderId);
     if (holderVisual) {
       this.uiManager.updateHudFlagHolder(holderVisual.name, holderVisual.colorCss);
+    } else {
+      this.uiManager.updateHudFlagHolder(null);
     }
   }
 
@@ -478,6 +522,7 @@ export class ArenaScene extends Phaser.Scene {
                      PLAYER_CONFIG.COLORS[this.playersMap.size % PLAYER_CONFIG.COLORS.length];
 
     const radius = PLAYER_CONFIG.RADIUS;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
 
     // Shadow
     const shadow = this.add.graphics();
@@ -503,7 +548,7 @@ export class ArenaScene extends Phaser.Scene {
     eyeG.fillCircle(7, -4, 2);
     container.add(eyeG);
 
-    // Name label
+    // Name label (sharp high-DPI rendering)
     const nameText = this.add.text(0, -radius - 16, serverP.name || 'Player', {
       fontFamily: 'Outfit, sans-serif',
       fontSize: '13px',
@@ -512,11 +557,12 @@ export class ArenaScene extends Phaser.Scene {
       stroke: '#090d16',
       strokeThickness: 3,
       align: 'center',
+      resolution: dpr,
     });
     nameText.setOrigin(0.5);
     container.add(nameText);
 
-    // Score label under character
+    // Score label under character (sharp high-DPI rendering)
     const scoreText = this.add.text(0, radius + 10, '0', {
       fontFamily: 'JetBrains Mono, monospace',
       fontSize: '12px',
@@ -525,6 +571,7 @@ export class ArenaScene extends Phaser.Scene {
       stroke: '#090d16',
       strokeThickness: 2,
       align: 'center',
+      resolution: dpr,
     });
     scoreText.setOrigin(0.5);
     container.add(scoreText);
