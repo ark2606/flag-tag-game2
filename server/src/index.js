@@ -52,6 +52,16 @@ app.get('/health', (req, res) => {
 // Optionally serve built static frontend if present (for single-container deploy)
 const distPath = path.resolve(__dirname, '../../client/dist');
 app.use(express.static(distPath));
+
+// Dedicated routes for standalone legal pages
+app.get(['/privacy', '/privacy.html'], (req, res) => {
+  res.sendFile(path.join(distPath, 'privacy.html'));
+});
+
+app.get(['/terms', '/terms.html'], (req, res) => {
+  res.sendFile(path.join(distPath, 'terms.html'));
+});
+
 app.get('*', (req, res, next) => {
   if (req.accepts('html')) {
     res.sendFile(path.join(distPath, 'index.html'), err => {

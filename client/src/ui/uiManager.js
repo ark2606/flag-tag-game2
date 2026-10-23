@@ -87,6 +87,18 @@ export class UIManager {
     this.tossInterval = null;
     this.tossTimeout = null;
 
+    // Legal modal elements
+    this.legalModalOverlay = document.getElementById('legal-modal-overlay');
+    this.closeLegalModalBtn = document.getElementById('close-legal-modal-btn');
+    this.closeLegalDoneBtn = document.getElementById('close-legal-done-btn');
+    this.tabPrivacyBtn = document.getElementById('tab-privacy-btn');
+    this.tabTermsBtn = document.getElementById('tab-terms-btn');
+    this.modalPrivacyContent = document.getElementById('modal-privacy-content');
+    this.modalTermsContent = document.getElementById('modal-terms-content');
+    this.modalExternalLink = document.getElementById('modal-external-link');
+    this.privacyLink = document.getElementById('privacy-link');
+    this.termsLink = document.getElementById('terms-link');
+
     this.currentSpeed = 440;
     this.currentMult = 1.0;
     this.selectedTimer = 120;
@@ -235,6 +247,106 @@ export class UIManager {
 
     // Orientation detection & rotate overlay
     this.setupOrientationDetection();
+
+    // Setup in-app legal modal viewer
+    this.setupLegalModal();
+  }
+
+  setupLegalModal() {
+    if (this.privacyLink) {
+      this.privacyLink.addEventListener('click', (e) => {
+        // Allow ctrl/cmd/middle click to open in new tab naturally
+        if (e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+          e.preventDefault();
+          this.showLegalModal('privacy');
+        }
+      });
+    }
+
+    if (this.termsLink) {
+      this.termsLink.addEventListener('click', (e) => {
+        if (e.button === 0 && !e.ctrlKey && !e.metaKey && !e.shiftKey) {
+          e.preventDefault();
+          this.showLegalModal('terms');
+        }
+      });
+    }
+
+    if (this.tabPrivacyBtn) {
+      this.tabPrivacyBtn.addEventListener('click', () => {
+        this.switchLegalTab('privacy');
+      });
+    }
+
+    if (this.tabTermsBtn) {
+      this.tabTermsBtn.addEventListener('click', () => {
+        this.switchLegalTab('terms');
+      });
+    }
+
+    if (this.closeLegalModalBtn) {
+      this.closeLegalModalBtn.addEventListener('click', () => {
+        this.hideLegalModal();
+      });
+    }
+
+    if (this.closeLegalDoneBtn) {
+      this.closeLegalDoneBtn.addEventListener('click', () => {
+        this.hideLegalModal();
+      });
+    }
+
+    if (this.legalModalOverlay) {
+      this.legalModalOverlay.addEventListener('click', (e) => {
+        if (e.target === this.legalModalOverlay) {
+          this.hideLegalModal();
+        }
+      });
+    }
+
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && this.legalModalOverlay && !this.legalModalOverlay.classList.contains('hidden')) {
+        this.hideLegalModal();
+      }
+    });
+  }
+
+  showLegalModal(tab = 'privacy') {
+    this.switchLegalTab(tab);
+    if (this.legalModalOverlay) {
+      this.legalModalOverlay.classList.remove('hidden');
+      this.legalModalOverlay.classList.add('active');
+    }
+  }
+
+  hideLegalModal() {
+    if (this.legalModalOverlay) {
+      this.legalModalOverlay.classList.add('hidden');
+      this.legalModalOverlay.classList.remove('active');
+    }
+  }
+
+  switchLegalTab(tab) {
+    const isPrivacy = tab === 'privacy';
+
+    if (this.tabPrivacyBtn) {
+      this.tabPrivacyBtn.classList.toggle('active', isPrivacy);
+    }
+    if (this.tabTermsBtn) {
+      this.tabTermsBtn.classList.toggle('active', !isPrivacy);
+    }
+
+    if (this.modalPrivacyContent) {
+      this.modalPrivacyContent.classList.toggle('hidden', !isPrivacy);
+    }
+    if (this.modalTermsContent) {
+      this.modalTermsContent.classList.toggle('hidden', isPrivacy);
+    }
+
+    if (this.modalExternalLink) {
+      this.modalExternalLink.href = isPrivacy ? './privacy.html' : './terms.html';
+      this.modalExternalLink.textContent = isPrivacy ? 'Open Standalone Privacy Page →' : 'Open Standalone Terms Page →';
+    }
   }
 
   async toggleFullscreen() {

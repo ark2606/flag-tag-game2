@@ -1,6 +1,6 @@
 // Phaser 3 2D Side-View Platform Arena Scene: rendering, physics interpolation, animations, and particle FX
 import Phaser from 'phaser';
-import { ARENA, PLATFORMS, SPRINGS, PLAYER_CONFIG, EVENTS } from '../../../shared/constants.js';
+import { ARENA, PLATFORMS, SPRINGS, PLAYER_CONFIG, PHYSICS_CONFIG, EVENTS } from '../../../shared/constants.js';
 import { soundSynth } from '../ui/soundSynth.js';
 
 export class ArenaScene extends Phaser.Scene {
@@ -28,6 +28,14 @@ export class ArenaScene extends Phaser.Scene {
     this.mobileDropPressed = false;
     this.lastSentInput = { x: 0, jump: false, dropDown: false };
     this.inputSendTimer = 0;
+
+    // Responsive local player prediction
+    this.localPredictedPos = null;
+    this.currentInputX = 0;
+    this.currentJumpRequested = false;
+    this.currentDropDown = false;
+    this.effectiveSpeed = 440;
+    this.isMatchPlaying = false;
   }
 
   init(data = {}) {
@@ -447,15 +455,34 @@ export class ArenaScene extends Phaser.Scene {
       }
     });
 
+    // Speed update listener
+    this.socketClient.on(EVENTS.SERVER.SPEED_UPDATED, (data) => {
+      this.effectiveSpeed = data.effectiveSpeed || data.baseSpeed || 440;
+    });
+
+    // Room state listener (reset prediction when leaving/resetting match)
+    this.socketClient.on(EVENTS.SERVER.ROOM_STATE, (room) => {
+      if (room.status !== 'playing') {
+        this.isMatchPlaying = false;
+        this.localPredictedPos = null;
+      }
+    });
+
     // 5. Match start
     this.socketClient.on(EVENTS.SERVER.GAME_STARTED, (data) => {
       this.flagHolderId = data.flagHolderId;
+      this.isMatchPlaying = true;
+      if (data.effectiveSpeed) {
+        this.effectiveSpeed = data.effectiveSpeed;
+      }
       soundSynth.startBGM();
       this.uiManager.showToast('MATCH STARTED: TAG THE FLAG HOLDER', 'bonus');
     });
 
     // 6. Match end
     this.socketClient.on(EVENTS.SERVER.GAME_ENDED, () => {
+      this.isMatchPlaying = false;
+      this.localPredictedPos = null;
       soundSynth.stopBGM();
       if (this.uiManager?.hidePhaseActive) {
         this.uiManager.hidePhaseActive();
@@ -618,6 +645,12 @@ export class ArenaScene extends Phaser.Scene {
     // Resonant spring launch SFX
     soundSynth.playSpringBounce();
 
+    // Synchronize local prediction with authoritative spring bounce impulse
+    if (data.playerId === this.myId && this.localPredictedPos) {
+      this.localPredictedPos.vy = data.impulse;
+      this.localPredictedPos.isGrounded = false;
+    }
+
     // Visual compression & rebound animation of tyre pad
     const springObj = this.springGraphics.get(data.springId);
     if (springObj) {
@@ -663,13 +696,109 @@ export class ArenaScene extends Phaser.Scene {
     for (const [id, visual] of this.playersMap.entries()) {
       const serverP = this.serverPlayerStates.get(id);
       if (serverP) {
-        // For the local player, snap to server position to prevent desync/floating
         const isLocalPlayer = (id === this.myId);
 
         if (isLocalPlayer) {
-          // Directly apply server position with minimal smoothing
-          visual.container.x = serverP.x;
-          visual.container.y = serverP.y;
+          if (!this.localPredictedPos) {
+            this.localPredictedPos = {
+              x: serverP.x,
+              y: serverP.y,
+              vy: serverP.vy || 0,
+              isGrounded: serverP.g || false,
+            };
+          }
+
+          if (this.isMatchPlaying) {
+            const currentSpeed = this.effectiveSpeed || 440;
+            const ix = this.currentInputX || 0;
+
+            // 1. Immediate local horizontal prediction (0ms latency response)
+            this.localPredictedPos.x += ix * currentSpeed * dt;
+            const minX = ARENA.WALL_THICKNESS + PLAYER_CONFIG.RADIUS;
+            const maxX = ARENA.WIDTH - ARENA.WALL_THICKNESS - PLAYER_CONFIG.RADIUS;
+            this.localPredictedPos.x = Math.max(minX, Math.min(maxX, this.localPredictedPos.x));
+
+            // 2. Immediate local jump prediction
+            if (this.currentJumpRequested && this.localPredictedPos.isGrounded) {
+              this.localPredictedPos.vy = PHYSICS_CONFIG.JUMP_VELOCITY;
+              this.localPredictedPos.isGrounded = false;
+            }
+
+            // 3. Gravitational acceleration
+            this.localPredictedPos.vy = Math.min(
+              PHYSICS_CONFIG.TERMINAL_VELOCITY,
+              this.localPredictedPos.vy + PHYSICS_CONFIG.GRAVITY * dt
+            );
+
+            const prevY = this.localPredictedPos.y;
+            let newY = prevY + this.localPredictedPos.vy * dt;
+
+            // One-way platform landing prediction
+            let groundedThisFrame = false;
+            if (this.localPredictedPos.vy >= 0 && !this.currentDropDown) {
+              for (const plat of PLATFORMS) {
+                const platTop = plat.y;
+                const feetPrev = prevY + PLAYER_CONFIG.RADIUS;
+                const feetNew = newY + PLAYER_CONFIG.RADIUS;
+                const withinX =
+                  this.localPredictedPos.x + PLAYER_CONFIG.RADIUS * 0.5 >= plat.x &&
+                  this.localPredictedPos.x - PLAYER_CONFIG.RADIUS * 0.5 <= plat.x + plat.width;
+
+                if (feetPrev <= platTop + 4 && feetNew >= platTop && withinX) {
+                  newY = platTop - PLAYER_CONFIG.RADIUS;
+                  this.localPredictedPos.vy = 0;
+                  groundedThisFrame = true;
+                  break;
+                }
+              }
+            }
+
+            // Floor boundary
+            const floorY = ARENA.GROUND_Y - PLAYER_CONFIG.RADIUS;
+            if (newY >= floorY) {
+              newY = floorY;
+              this.localPredictedPos.vy = 0;
+              groundedThisFrame = true;
+            }
+
+            // Ceiling boundary
+            const ceilingY = ARENA.WALL_THICKNESS + PLAYER_CONFIG.RADIUS;
+            if (newY <= ceilingY) {
+              newY = ceilingY;
+              if (this.localPredictedPos.vy < 0) this.localPredictedPos.vy = 0;
+            }
+
+            this.localPredictedPos.y = newY;
+            this.localPredictedPos.isGrounded = groundedThisFrame || serverP.g;
+
+            // Reconcile softly with server authoritative position
+            const dx = serverP.x - this.localPredictedPos.x;
+            const dy = serverP.y - this.localPredictedPos.y;
+            const dist = Math.hypot(dx, dy);
+
+            if (dist > 80) {
+              // Snap on large divergence (e.g. spring launch or boundary teleport)
+              this.localPredictedPos.x = serverP.x;
+              this.localPredictedPos.y = serverP.y;
+              this.localPredictedPos.vy = serverP.vy;
+              this.localPredictedPos.isGrounded = serverP.g;
+            } else {
+              const reconcileRate = Math.min(1, dt * 10);
+              this.localPredictedPos.x += dx * reconcileRate;
+              this.localPredictedPos.y += dy * reconcileRate;
+            }
+
+            visual.container.x = this.localPredictedPos.x;
+            visual.container.y = this.localPredictedPos.y;
+          } else {
+            // In lobby or before start, snap directly to server position
+            this.localPredictedPos.x = serverP.x;
+            this.localPredictedPos.y = serverP.y;
+            this.localPredictedPos.vy = serverP.vy;
+            this.localPredictedPos.isGrounded = serverP.g;
+            visual.container.x = serverP.x;
+            visual.container.y = serverP.y;
+          }
         } else {
           // Smooth interpolation for remote players
           visual.container.x = Phaser.Math.Linear(visual.container.x, serverP.x, lerpFactor);
@@ -678,13 +807,19 @@ export class ArenaScene extends Phaser.Scene {
 
         visual.scoreText.setText(serverP.s);
 
-        // Orient eyes toward velocity
-        if (Math.abs(serverP.vx) > 10) {
-          visual.eyeG.x = Math.sign(serverP.vx) * 4;
+        // Orient eyes toward velocity (immediate local response)
+        const activeVx = isLocalPlayer && this.isMatchPlaying
+          ? (this.currentInputX || 0) * 100
+          : serverP.vx;
+        if (Math.abs(activeVx) > 10) {
+          visual.eyeG.x = Math.sign(activeVx) * 4;
         }
 
         // Squash & stretch based on jumping/grounded state
-        if (!serverP.g) {
+        const isGrounded = isLocalPlayer && this.isMatchPlaying
+          ? this.localPredictedPos.isGrounded
+          : serverP.g;
+        if (!isGrounded) {
           // Airborne stretch
           visual.body.scaleY = 1.08;
           visual.body.scaleX = 0.94;
@@ -765,6 +900,11 @@ export class ArenaScene extends Phaser.Scene {
         dropDown = true;
       }
     }
+
+    // Save inputs for immediate local prediction in update()
+    this.currentInputX = ix;
+    this.currentJumpRequested = jump;
+    this.currentDropDown = dropDown;
 
     // Sound effect on local jump initiation
     if (jump && !this.lastSentInput.jump) {

@@ -138,11 +138,25 @@
         </div>
       </div>
 
-      <!-- Legal Navigation Footer -->
-      <footer class="legal-footer">
-        <a href="./privacy.html" class="legal-link">Privacy Policy</a>
-        <span class="legal-separator">•</span>
-        <a href="./terms.html" class="legal-link">Terms and Conditions</a>
+      <!-- Footer: Creator Credits & Legal Links -->
+      <footer class="menu-footer">
+        <div class="creator-credits">
+          <span class="creator-label">Created by</span>
+          <span class="creator-name">Ankit Raj</span>
+          <div class="creator-links">
+            <a href="https://github.com/ark2606" target="_blank" rel="noopener noreferrer" class="creator-link" id="creator-github">GitHub</a>
+            <span class="link-separator">•</span>
+            <a href="https://www.linkedin.com/in/ark26/" target="_blank" rel="noopener noreferrer" class="creator-link" id="creator-linkedin">LinkedIn</a>
+            <span class="link-separator">•</span>
+            <a href="https://www.instagram.com/__ankitrajjj/" target="_blank" rel="noopener noreferrer" class="creator-link" id="creator-instagram">Instagram</a>
+          </div>
+        </div>
+
+        <div class="legal-footer">
+          <a href="./privacy.html" target="_blank" rel="noopener noreferrer" class="legal-link" id="privacy-link">Privacy Policy</a>
+          <span class="legal-separator">•</span>
+          <a href="./terms.html" target="_blank" rel="noopener noreferrer" class="legal-link" id="terms-link">Terms and Conditions</a>
+        </div>
       </footer>
     </div>
   </div>
@@ -349,6 +363,62 @@
         <button id="alone-menu-btn" class="btn btn-secondary">
           Main Menu
         </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- LEGAL MODAL (IN-APP PRIVACY POLICY & TERMS VIEWER) -->
+  <div id="legal-modal-overlay" class="screen-overlay hidden">
+    <div class="legal-modal-card glass-panel">
+      <div class="legal-modal-header">
+        <div class="legal-modal-tabs">
+          <button type="button" class="legal-tab-btn active" id="tab-privacy-btn">Privacy Policy</button>
+          <button type="button" class="legal-tab-btn" id="tab-terms-btn">Terms and Conditions</button>
+        </div>
+        <button type="button" class="legal-modal-close" id="close-legal-modal-btn" aria-label="Close dialog">&times;</button>
+      </div>
+
+      <div class="legal-modal-body">
+        <div id="modal-privacy-content" class="legal-modal-pane">
+          <h3>Privacy Policy</h3>
+          <p class="legal-meta">Last updated: October 2026</p>
+          <div class="legal-content-block">
+            <h4>1. Overview</h4>
+            <p>This Privacy Policy explains how FLAG-TAG collects, uses, and safeguards information when you play our online multiplayer arena game. We are committed to protecting player privacy and collecting only data necessary to deliver a stable, fair multiplayer experience.</p>
+            <h4>2. Information We Collect</h4>
+            <p>We collect minimal information to operate multiplayer matches: Player Nicknames, Ephemeral Session Data (WebSocket ID, ping latency), and Client Settings (volume and audio preferences stored directly in your browser). No accounts, emails, or passwords are required.</p>
+            <h4>3. How We Use Information</h4>
+            <p>Data is used exclusively to synchronize real-time match state (scores, positions, flag transfers) and maintain room stability.</p>
+            <h4>4. Data Retention and Third Parties</h4>
+            <p>Room states exist entirely in volatile server memory during active sessions and are purged immediately when matches end. We never sell or share data with third parties or advertising networks.</p>
+            <h4>5. Contact and Creator</h4>
+            <p>FLAG-TAG is created and maintained by Ankit Raj (<a href="https://github.com/ark2606" target="_blank" rel="noopener noreferrer" class="legal-link">GitHub</a> | <a href="https://www.linkedin.com/in/ark26/" target="_blank" rel="noopener noreferrer" class="legal-link">LinkedIn</a> | <a href="https://www.instagram.com/__ankitrajjj/" target="_blank" rel="noopener noreferrer" class="legal-link">Instagram</a>).</p>
+          </div>
+        </div>
+
+        <div id="modal-terms-content" class="legal-modal-pane hidden">
+          <h3>Terms and Conditions</h3>
+          <p class="legal-meta">Last updated: October 2026</p>
+          <div class="legal-content-block">
+            <h4>1. Agreement to Terms</h4>
+            <p>By accessing and playing FLAG-TAG, you agree to comply with and be bound by these Terms and Conditions.</p>
+            <h4>2. Permitted Use and Fair Play</h4>
+            <p>FLAG-TAG is provided for real-time competitive entertainment. Automated scripts, physics bots, denial-of-service attempts, packet injection, and abusive conduct are strictly prohibited.</p>
+            <h4>3. Server Authority</h4>
+            <p>The FLAG-TAG game server maintains full authority over game timing, player positions, collision verification, flag ownership, and scoring calculations.</p>
+            <h4>4. Intellectual Property</h4>
+            <p>All source code, visual design elements, sound synthesis algorithms, game systems, and brand assets associated with FLAG-TAG are the property of creator Ankit Raj.</p>
+            <h4>5. Limitation of Liability</h4>
+            <p>The game is provided "as is". Developers are not liable for connection interruptions, server downtime, or loss of game progress.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="legal-modal-footer">
+        <a id="modal-external-link" href="./privacy.html" target="_blank" rel="noopener noreferrer" class="legal-link">
+          Open Standalone Page &rarr;
+        </a>
+        <button type="button" id="close-legal-done-btn" class="btn btn-secondary btn-sm">Close</button>
       </div>
     </div>
   </div>
