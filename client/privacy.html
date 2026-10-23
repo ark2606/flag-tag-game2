@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Privacy Policy - FLAG-TAG</title>
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="./src/style.css" />
+  <style>
+    body.legal-page {
+      overflow-y: auto;
+      touch-action: auto;
+      user-select: text;
+      -webkit-user-select: text;
+      padding: 2rem 1rem;
+      background: #090d16;
+      color: #f8fafc;
+      font-family: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+      line-height: 1.6;
+    }
+    .legal-container {
+      max-width: 800px;
+      margin: 0 auto;
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 12px;
+      padding: 2.5rem;
+    }
+    .legal-header {
+      margin-bottom: 2rem;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      padding-bottom: 1.5rem;
+    }
+    .legal-header h1 {
+      font-size: 2.2rem;
+      font-weight: 800;
+      color: #fff;
+      margin-bottom: 0.5rem;
+    }
+    .legal-meta {
+      font-size: 0.9rem;
+      color: #94a3b8;
+    }
+    .legal-section {
+      margin-bottom: 1.8rem;
+    }
+    .legal-section h2 {
+      font-size: 1.3rem;
+      font-weight: 700;
+      color: #06b6d4;
+      margin-bottom: 0.75rem;
+    }
+    .legal-section p, .legal-section ul {
+      color: #cbd5e1;
+      font-size: 0.95rem;
+      margin-bottom: 0.75rem;
+    }
+    .legal-section ul {
+      padding-left: 1.5rem;
+    }
+    .legal-section li {
+      margin-bottom: 0.4rem;
+    }
+    .legal-nav-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.65rem 1.25rem;
+      background: rgba(255, 255, 255, 0.08);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      border-radius: 8px;
+      color: #f8fafc;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 0.9rem;
+      transition: background 0.15s ease, border-color 0.15s ease;
+      margin-bottom: 1.5rem;
+    }
+    .legal-nav-btn:hover {
+      background: rgba(255, 255, 255, 0.14);
+      border-color: rgba(255, 255, 255, 0.3);
+    }
+  </style>
+</head>
+<body class="legal-page">
+  <div class="legal-container">
+    <a href="./index.html" class="legal-nav-btn">&larr; Return to Game</a>
+
+    <header class="legal-header">
+      <h1>Privacy Policy</h1>
+      <p class="legal-meta">Last updated: October 2026</p>
+    </header>
+
+    <div class="legal-section">
+      <h2>1. Overview</h2>
+      <p>This Privacy Policy explains how FLAG-TAG collects, uses, and safeguards information when you play our online multiplayer arena game. We are committed to protecting player privacy and collecting only data necessary to deliver a stable, fair multiplayer experience.</p>
+    </div>
+
+    <div class="legal-section">
+      <h2>2. Information We Collect</h2>
+      <p>We collect minimal information to operate multiplayer matches:</p>
+      <ul>
+        <li><strong>Player Nickname:</strong> The display name you choose when joining a room. This is broadcast to other players in your game room and is discarded when the room closes.</li>
+        <li><strong>Ephemeral Session Data:</strong> Technical connection metadata (WebSocket connection identifiers, latency measurements, and transient room identifiers) used to route match traffic.</li>
+        <li><strong>Client Settings:</strong> Locally stored browser preferences (such as audio volume and mute settings) stored directly on your device via localStorage.</li>
+      </ul>
+      <p>We do not require account registration, passwords, email addresses, or payment information to play.</p>
+    </div>
+
+    <div class="legal-section">
+      <h2>3. How We Use Information</h2>
+      <p>Collected data is used strictly for:</p>
+      <ul>
+        <li>Facilitating real-time match state synchronization (scores, player positions, flag transfers).</li>
+        <li>Enforcing room capacity limits (maximum 8 players per room) and match rules.</li>
+        <li>Detecting network disconnection and maintaining room host stability.</li>
+      </ul>
+    </div>
+
+    <div class="legal-section">
+      <h2>4. Data Sharing and Third Parties</h2>
+      <p>We do not sell, rent, or trade your personal information. Match telemetry is never shared with third-party data brokers or advertising networks.</p>
+    </div>
+
+    <div class="legal-section">
+      <h2>5. Data Retention</h2>
+      <p>Room states, nicknames, and match statistics exist entirely in volatile server memory during active sessions. When a match ends and all participants leave, room state is purged immediately from memory.</p>
+    </div>
+
+    <div class="legal-section">
+      <h2>6. Security</h2>
+      <p>We implement authoritative server verification for all game actions (movement boundaries, flag transfers, and scoring) to prevent tampering and ensure fair play for all participants.</p>
+    </div>
+
+    <div class="legal-section">
+      <h2>7. Contact and Inquiries</h2>
+      <p>If you have questions regarding this Privacy Policy or game data handling, please contact the repository administrators via our official project channels.</p>
+    </div>
+
+    <a href="./index.html" class="legal-nav-btn">&larr; Return to Game</a>
+  </div>
+</body>
+</html>

@@ -4,6 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
   <title>FLAG-TAG | 2D Online Multiplayer Arena</title>
+  <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;800;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
@@ -15,7 +16,6 @@
     <!-- Left Section: Live Scorecard (Horizontal Cards) -->
     <div class="top-bar-section top-scorecard-section">
       <div class="scorecard-tag">
-        <span class="scorecard-icon">🏆</span>
         <span class="scorecard-title">SCORES</span>
       </div>
       <div id="scoreboard-list" class="scorecard-strip">
@@ -27,13 +27,13 @@
     <!-- Center Section: Round Timer & Flag Status -->
     <div class="top-bar-section top-center-section">
       <div id="hud-timer-card" class="hud-top-card timer-card">
-        <span class="hud-timer-label">⏱ TIME</span>
+        <span class="hud-timer-label">TIME</span>
         <span id="hud-timer" class="hud-timer-value">120</span>
       </div>
 
       <div id="hud-flag-card" class="hud-top-card flag-card">
-        <span class="hud-flag-icon">🚩</span>
-        <span id="hud-flag-text">Flag Holder: <strong>None</strong></span>
+        <span class="hud-flag-icon">FLAG</span>
+        <span id="hud-flag-text">Holder: <strong>None</strong></span>
       </div>
     </div>
 
@@ -42,11 +42,11 @@
       <!-- Speed Control Panel -->
       <div id="speed-control-panel" class="speed-panel" title="Match Speed Controls">
         <div class="speed-label-row">
-          <span class="speed-panel-label">⚡ SPEED</span>
+          <span class="speed-panel-label">SPEED</span>
           <span id="speed-mult" class="speed-mult-tag">1.0x</span>
         </div>
         <div class="speed-stepper">
-          <button id="speed-dec-btn" class="speed-btn" title="Decrease Speed (−40 px/s)">−</button>
+          <button id="speed-dec-btn" class="speed-btn" title="Decrease Speed (-40 px/s)">-</button>
           <div class="speed-readout">
             <span id="speed-value" class="speed-val">440</span>
             <span class="speed-unit">px/s</span>
@@ -69,11 +69,11 @@
           <span id="ping-text">Connecting...</span>
         </div>
         <div class="volume-control">
-          <label for="volume-slider" class="volume-icon">🔊</label>
+          <label for="volume-slider" class="volume-icon">VOL</label>
           <input type="range" id="volume-slider" min="0" max="100" value="70" class="volume-slider" title="Master Volume" />
         </div>
-        <button id="sound-toggle-btn" class="icon-btn" title="Toggle Mute">🔊</button>
-        <button id="fullscreen-btn" class="icon-btn" title="Toggle Landscape Fullscreen">⛶</button>
+        <button id="sound-toggle-btn" class="icon-btn" title="Toggle Mute">SND</button>
+        <button id="fullscreen-btn" class="icon-btn" title="Toggle Landscape Fullscreen">FS</button>
       </div>
     </div>
   </header>
@@ -83,7 +83,7 @@
 
   <!-- Dynamic Scoring Phase Banner (shown during special phases) -->
   <div id="phase-banner" class="phase-banner hidden">
-    <div id="phase-title" class="phase-title">🔥 BONUS PHASE</div>
+    <div id="phase-title" class="phase-title">BONUS PHASE</div>
     <div id="phase-description" class="phase-description">Special scoring active!</div>
   </div>
 
@@ -94,7 +94,7 @@
   <div id="main-menu" class="screen-overlay active">
     <div class="menu-card glass-panel">
       <div class="brand">
-        <div class="brand-badge">⚡ ONLINE MULTIPLAYER</div>
+        <div class="brand-badge">ONLINE MULTIPLAYER</div>
         <h1 class="game-title">FLAG<span class="accent-text">TAG</span></h1>
         <p class="tagline">Hot-potato tag arena. Hold it, pass it, score big, don't get stuck with it!</p>
       </div>
@@ -106,7 +106,7 @@
 
       <div class="menu-actions">
         <button id="create-room-btn" class="btn btn-primary btn-large">
-          <span class="btn-icon">⚡</span> Create Private Room
+          Create Private Room
         </button>
 
         <div class="divider"><span>OR JOIN WITH CODE</span></div>
@@ -122,21 +122,28 @@
       <!-- Quick Rules & Controls -->
       <div class="menu-info-grid">
         <div class="info-box">
-          <h4>🎮 Controls</h4>
-          <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or <kbd>↑</kbd><kbd>←</kbd><kbd>↓</kbd><kbd>→</kbd></p>
+          <h4>Controls</h4>
+          <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or <kbd>&uarr;</kbd><kbd>&larr;</kbd><kbd>&darr;</kbd><kbd>&rarr;</kbd></p>
           <small>Touch / Virtual Joystick on mobile</small>
         </div>
         <div class="info-box">
-          <h4>🏆 Scoring Rules</h4>
+          <h4>Scoring Rules</h4>
           <ul>
-            <li>🚩 Starting Holder: <strong>+30 pts</strong></li>
-            <li>⏱ Non-holders: <strong>+1 pt/s</strong> | Holder: <strong>-2 pts/s</strong></li>
-            <li>⭐ 5s Hold Bonus: <strong>+8 pts</strong></li>
-            <li>🤝 Successful Pass: <strong>+5 pts</strong></li>
-            <li>💥 Holding at 0s: <strong>-40 pts</strong></li>
+            <li>Starting Holder: <strong>+30 pts</strong></li>
+            <li>Non-holders: <strong>+1 pt/s</strong> | Holder: <strong>-2 pts/s</strong></li>
+            <li>5s Hold Bonus: <strong>+8 pts</strong></li>
+            <li>Successful Pass: <strong>+5 pts</strong></li>
+            <li>Holding at 0s: <strong>-40 pts</strong></li>
           </ul>
         </div>
       </div>
+
+      <!-- Legal Navigation Footer -->
+      <footer class="legal-footer">
+        <a href="./privacy.html" class="legal-link">Privacy Policy</a>
+        <span class="legal-separator">•</span>
+        <a href="./terms.html" class="legal-link">Terms and Conditions</a>
+      </footer>
     </div>
   </div>
 
@@ -152,7 +159,7 @@
           </div>
         </div>
         <button id="copy-invite-btn" class="btn btn-secondary btn-sm">
-          📋 Copy Invite Link
+          Copy Invite Link
         </button>
       </div>
 
@@ -168,7 +175,7 @@
 
         <!-- Room Settings (Host customizable) -->
         <div id="lobby-settings-panel" class="lobby-settings-box">
-          <div id="lobby-settings-title" class="lobby-settings-title">⚙️ MATCH SETTINGS</div>
+          <div id="lobby-settings-title" class="lobby-settings-title">MATCH SETTINGS</div>
           <div class="settings-grid">
             <div class="setting-item">
               <label>Match Speed</label>
@@ -201,7 +208,7 @@
         <div class="host-controls">
           <div id="waiting-notice" class="waiting-text">Waiting for host to start...</div>
           <button id="start-game-btn" class="btn btn-primary btn-large hidden">
-            🚀 Start Match
+            Start Match
           </button>
         </div>
       </div>
@@ -214,20 +221,20 @@
     <div id="toss-overlay" class="toss-overlay hidden">
       <div class="toss-card glass-panel">
         <div class="toss-header">
-          <span class="badge badge-warning">🪙 FLAG TOSS</span>
+          <span class="badge badge-warning">FLAG TOSS</span>
           <h3>Selecting Initial Flag Holder</h3>
         </div>
 
         <div class="coin-container">
           <div class="coin" id="toss-coin">
-            <div class="coin-face coin-front">🚩</div>
-            <div class="coin-face coin-back">🪙</div>
+            <div class="coin-face coin-front">FLAG</div>
+            <div class="coin-face coin-back">TAG</div>
           </div>
         </div>
 
         <div class="toss-candidate-box" id="toss-candidate-box">
           <div class="toss-candidate-avatar" id="toss-avatar">?</div>
-          <div class="toss-candidate-name" id="toss-name">Flipping...</div>
+          <div class="toss-candidate-name" id="toss-name">Selecting...</div>
         </div>
 
         <div class="toss-winner-banner hidden" id="toss-winner-banner">
@@ -253,11 +260,11 @@
     <!-- Mobile Action Buttons (Right Side: Jump & Drop Down) -->
     <div id="mobile-action-buttons" class="mobile-actions-zone">
       <button id="mobile-drop-btn" class="mobile-action-btn mobile-drop-btn" aria-label="Drop Down through platform" title="Drop Down">
-        <span class="btn-icon-glyph">⬇</span>
+        <span class="btn-icon-glyph">&darr;</span>
         <span class="btn-label-text">DROP</span>
       </button>
       <button id="mobile-jump-btn" class="mobile-action-btn mobile-jump-btn" aria-label="Jump" title="Jump">
-        <span class="btn-icon-glyph">⬆</span>
+        <span class="btn-icon-glyph">&uarr;</span>
         <span class="btn-label-text">JUMP</span>
       </button>
     </div>
@@ -267,7 +274,7 @@
   <div id="results-screen" class="screen-overlay">
     <div class="results-card glass-panel">
       <div class="results-header">
-        <div class="winner-trophy">🏆</div>
+        <div class="results-badge">MATCH RESULTS</div>
         <h2 id="winner-announcement">ROUND OVER!</h2>
         <p id="winner-subtitle" class="winner-sub">The dust has settled.</p>
       </div>
@@ -291,10 +298,10 @@
 
       <div class="results-actions">
         <button id="results-rematch-btn" class="btn btn-primary btn-large hidden">
-          🔄 Rematch
+          Rematch
         </button>
         <button id="results-lobby-btn" class="btn btn-secondary">
-          🏠 Return to Lobby
+          Return to Lobby
         </button>
       </div>
     </div>
@@ -306,10 +313,10 @@
       <div class="rotate-phone-animation">
         <div class="phone-body">
           <div class="phone-screen">
-            <span class="phone-game-icon">🚩</span>
+            <span class="phone-game-icon">LANDSCAPE</span>
           </div>
         </div>
-        <div class="rotate-arrow">↻</div>
+        <div class="rotate-arrow">&orarr;</div>
       </div>
       <h2 class="rotate-title">Rotate to Landscape</h2>
       <p class="rotate-desc">
@@ -317,10 +324,10 @@
       </p>
       <div class="rotate-actions">
         <button id="rotate-fullscreen-btn" class="btn btn-primary btn-large">
-          <span class="btn-icon">⛶</span> Landscape Fullscreen
+          Landscape Fullscreen
         </button>
         <button id="rotate-leave-btn" class="btn btn-outline btn-sm">
-          🚪 Leave Room
+          Leave Room
         </button>
       </div>
     </div>
@@ -329,18 +336,18 @@
   <!-- SCREEN 5: GAME OVER - ALL PLAYERS LEFT -->
   <div id="game-over-alone-overlay" class="screen-overlay hidden">
     <div class="results-card glass-panel alone-card">
-      <div class="winner-trophy alone-icon">🚪🏃💨</div>
-      <h2 class="alone-title">GAME OVER</h2>
+      <div class="alone-notice-badge">GAME OVER</div>
+      <h2 class="alone-title">MATCH CONCLUDED</h2>
       <h3 id="alone-message-text" class="alone-subtitle">Everyone has left the room!</h3>
       <p class="alone-desc">
         All other players have left or disconnected from the match. You are the last player remaining in this room.
       </p>
       <div class="results-actions">
         <button id="alone-back-lobby-btn" class="btn btn-primary btn-large">
-          🏠 Return to Lobby
+          Return to Lobby
         </button>
         <button id="alone-menu-btn" class="btn btn-secondary">
-          🚪 Main Menu
+          Main Menu
         </button>
       </div>
     </div>

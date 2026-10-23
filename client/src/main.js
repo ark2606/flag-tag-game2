@@ -167,7 +167,7 @@ class GameApp {
 
     this.network.on(EVENTS.SERVER.SPEED_UPDATED, (data) => {
       this.ui.updateSpeedDisplay(data.effectiveSpeed || data.baseSpeed, data.speedMultiplier);
-      this.ui.showToast(`⚡ Match Speed: ${data.effectiveSpeed} px/s (${data.speedMultiplier}x)`, 'bonus');
+      this.ui.showToast(`Match Speed: ${data.effectiveSpeed} px/s (${data.speedMultiplier}x)`, 'bonus');
     });
 
     this.network.on(EVENTS.SERVER.FLAG_TOSS, (tossData) => {
@@ -197,12 +197,12 @@ class GameApp {
     });
 
     this.network.on(EVENTS.SERVER.PLAYER_LEFT, (data) => {
-      this.ui.showToast(`🚪 ${data.name || 'A player'} has left the room.`, 'warning');
+      this.ui.showToast(`${data.name || 'A player'} has left the room.`, 'warning');
       if (data.leftAlone || data.remainingPlayers === 1) {
         if (this.currentRoomState?.status === ROOM_STATUS.PLAYING || this.currentRoomState?.status === ROOM_STATUS.COUNTDOWN) {
           this.ui.showGameOverAlone('Everyone has left the room!');
         } else if (this.currentRoomState?.status === ROOM_STATUS.LOBBY) {
-          this.ui.showToast('👤 Everyone else has left the room. You are now alone.', 'error');
+          this.ui.showToast('Everyone else has left the room. You are now alone.', 'error');
         }
       }
     });
@@ -223,11 +223,11 @@ class GameApp {
     });
 
     this.network.on(EVENTS.SERVER.ROOM_ERROR, (err) => {
-      this.ui.showToast(`⚠️ ${err.message || 'Error occurred'}`, 'error');
+      this.ui.showToast(`${err.message || 'Error occurred'}`, 'error');
     });
 
     this.network.on('disconnect', () => {
-      this.ui.showToast('⚠️ Disconnected from server. Reconnecting...', 'error');
+      this.ui.showToast('Disconnected from server. Reconnecting...', 'error');
     });
   }
 
@@ -236,7 +236,7 @@ class GameApp {
     this.ui.onSpeedChangeRequest = async (changeData) => {
       const res = await this.network.changeSpeed(changeData);
       if (res && !res.success) {
-        this.ui.showToast(`⚠️ ${res.reason || 'Could not change speed'}`, 'error');
+        this.ui.showToast(`${res.reason || 'Could not change speed'}`, 'error');
       }
     };
 
@@ -253,7 +253,7 @@ class GameApp {
       const res = await this.network.createRoom(name, customConfig);
       this.ui.createRoomBtn.disabled = false;
       if (!res.success) {
-        this.ui.showToast(`⚠️ ${res.reason || 'Could not create room'}`, 'error');
+        this.ui.showToast(`${res.reason || 'Could not create room'}`, 'error');
       }
     });
 
@@ -263,14 +263,14 @@ class GameApp {
       const name = this.ui.getPlayerName();
 
       if (!code) {
-        return this.ui.showToast('⚠️ Please enter a room code.', 'error');
+        return this.ui.showToast('Please enter a room code.', 'error');
       }
 
       this.ui.joinRoomBtn.disabled = true;
       const res = await this.network.joinRoom(code, name);
       this.ui.joinRoomBtn.disabled = false;
       if (!res.success) {
-        this.ui.showToast(`⚠️ ${res.reason || 'Could not join room'}`, 'error');
+        this.ui.showToast(`${res.reason || 'Could not join room'}`, 'error');
       }
     });
 
@@ -301,7 +301,7 @@ class GameApp {
     this.ui.startGameBtn.addEventListener('click', () => {
       if (this.ui.isPortrait()) {
         this.pendingStartOnLandscape = true;
-        this.ui.showToast('📱 Please rotate to landscape orientation to start the game!', 'warning');
+        this.ui.showToast('Please rotate to landscape orientation to start the game.', 'warning');
         this.ui.showRotateOverlay(true);
         return;
       }
@@ -313,7 +313,7 @@ class GameApp {
     const checkLandscapeStart = () => {
       if (!this.ui.isPortrait() && this.pendingStartOnLandscape) {
         this.pendingStartOnLandscape = false;
-        this.ui.showToast('✅ Landscape detected! Starting match...', 'bonus');
+        this.ui.showToast('Landscape detected. Starting match...', 'bonus');
         this.network.startGame();
       }
     };

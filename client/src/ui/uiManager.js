@@ -112,10 +112,10 @@ export class UIManager {
 
     // Sound toggle listener
     if (this.soundToggleBtn) {
-      this.soundToggleBtn.textContent = soundSynth.isMuted ? '🔇' : '🔊';
+      this.soundToggleBtn.textContent = soundSynth.isMuted ? 'MUTE' : 'SND';
       this.soundToggleBtn.addEventListener('click', () => {
         const muted = soundSynth.toggleMute();
-        this.soundToggleBtn.textContent = muted ? '🔇' : '🔊';
+        this.soundToggleBtn.textContent = muted ? 'MUTE' : 'SND';
       });
     }
 
@@ -132,7 +132,7 @@ export class UIManager {
     if (this.speedIncBtn) {
       this.speedIncBtn.addEventListener('click', () => {
         if (!this.isCurrentHost) {
-          this.showToast('⚠️ Only the room host (👑) can change match speed.', 'error');
+          this.showToast('Only the room host can change match speed.', 'error');
           return;
         }
         if (typeof this.onSpeedChangeRequest === 'function') {
@@ -144,7 +144,7 @@ export class UIManager {
     if (this.speedDecBtn) {
       this.speedDecBtn.addEventListener('click', () => {
         if (!this.isCurrentHost) {
-          this.showToast('⚠️ Only the room host (👑) can change match speed.', 'error');
+          this.showToast('Only the room host can change match speed.', 'error');
           return;
         }
         if (typeof this.onSpeedChangeRequest === 'function') {
@@ -157,7 +157,7 @@ export class UIManager {
       this.speedPresetBtns.forEach((btn) => {
         btn.addEventListener('click', () => {
           if (!this.isCurrentHost) {
-            this.showToast('⚠️ Only the room host (👑) can change match speed.', 'error');
+            this.showToast('Only the room host can change match speed.', 'error');
             return;
           }
           const mult = parseFloat(btn.dataset.mult);
@@ -173,7 +173,7 @@ export class UIManager {
       this.lobbySpeedPills.forEach((pill) => {
         pill.addEventListener('click', () => {
           if (!this.isCurrentHost) {
-            this.showToast('⚠️ Only the room host (👑) can change match speed.', 'error');
+            this.showToast('Only the room host can change match speed.', 'error');
             return;
           }
           const mult = parseFloat(pill.dataset.speedMult);
@@ -188,7 +188,7 @@ export class UIManager {
       this.lobbyTimerPills.forEach((pill) => {
         pill.addEventListener('click', () => {
           if (!this.isCurrentHost) {
-            this.showToast('⚠️ Only the room host (👑) can change round duration.', 'error');
+            this.showToast('Only the room host can change round duration.', 'error');
             return;
           }
           this.lobbyTimerPills.forEach((p) => p.classList.remove('active'));
@@ -206,7 +206,7 @@ export class UIManager {
         const inviteUrl = `${window.location.origin}${window.location.pathname}?room=${code}`;
         navigator.clipboard.writeText(inviteUrl).then(() => {
           const originalText = this.copyInviteBtn.textContent;
-          this.copyInviteBtn.textContent = '✅ Copied Link!';
+          this.copyInviteBtn.textContent = 'Copied Link!';
           setTimeout(() => {
             this.copyInviteBtn.textContent = originalText;
           }, 2000);
@@ -229,7 +229,7 @@ export class UIManager {
       });
       document.addEventListener('fullscreenchange', () => {
         const isFs = !!document.fullscreenElement;
-        this.fullscreenBtn.textContent = isFs ? '🗗' : '⛶';
+        this.fullscreenBtn.textContent = isFs ? 'WIN' : 'FS';
       });
     }
 
@@ -414,7 +414,7 @@ export class UIManager {
       this.startGameBtn.title = players.length < 2 ? 'Need at least 2 players' : 'Start Match';
 
       if (this.lobbySettingsTitle) {
-        this.lobbySettingsTitle.innerHTML = '⚙️ MATCH SETTINGS <span class="badge-role-tag host-tag">👑 You Control Settings</span>';
+        this.lobbySettingsTitle.innerHTML = 'MATCH SETTINGS <span class="badge-role-tag host-tag">Host Controls Settings</span>';
       }
 
       this.lobbySpeedPills?.forEach((pill) => {
@@ -430,7 +430,7 @@ export class UIManager {
       this.waitingNotice.classList.remove('hidden');
 
       if (this.lobbySettingsTitle) {
-        this.lobbySettingsTitle.innerHTML = '⚙️ MATCH SETTINGS <span class="badge-role-tag guest-tag">🔒 Controlled by Host (👑)</span>';
+        this.lobbySettingsTitle.innerHTML = 'MATCH SETTINGS <span class="badge-role-tag guest-tag">Controlled by Host</span>';
       }
 
       this.lobbySpeedPills?.forEach((pill) => {
@@ -460,7 +460,7 @@ export class UIManager {
 
       const badge = document.createElement('div');
       badge.className = `player-role-badge ${p.isHost ? 'host' : ''}`;
-      badge.textContent = p.isHost ? '👑 HOST' : 'PLAYER';
+      badge.textContent = p.isHost ? 'HOST' : 'PLAYER';
 
       card.appendChild(avatar);
       card.appendChild(name);
@@ -521,11 +521,11 @@ export class UIManager {
           this.tossWinnerBanner.classList.remove('hidden');
         }
         if (this.tossWinnerName) {
-          this.tossWinnerName.innerHTML = `<span style="color:${winnerColor}">🚩</span> ${winnerName}`;
+          this.tossWinnerName.innerHTML = `<span style="color:${winnerColor}">[FLAG]</span> ${winnerName}`;
         }
 
         soundSynth.playTossWin();
-        this.showToast(`🪙 Flag Toss: ${winnerName} gets the flag! (+${startingBonus} bonus)`, 'bonus');
+        this.showToast(`Flag Toss: ${winnerName} gets the flag! (+${startingBonus} bonus)`, 'bonus');
         this.updateHudFlagHolder(winnerName, winnerColor);
 
         // Auto hide toss overlay after display
@@ -616,7 +616,7 @@ export class UIManager {
       // Rank badge
       const rank = document.createElement('span');
       rank.className = `score-rank rank-${idx + 1}`;
-      rank.textContent = idx === 0 ? '👑' : `#${idx + 1}`;
+      rank.textContent = `#${idx + 1}`;
 
       // Colored avatar dot
       const dot = document.createElement('span');
@@ -626,7 +626,7 @@ export class UIManager {
       // Player name
       const name = document.createElement('span');
       name.className = 'score-name';
-      name.textContent = (isHolder ? '🚩 ' : '') + (p.name || 'Player');
+      name.textContent = (isHolder ? '[FLAG] ' : '') + (p.name || 'Player');
 
       // Points
       const score = document.createElement('span');
@@ -647,7 +647,7 @@ export class UIManager {
     const { rankings, winner, finalPenalty } = resultsData;
 
     if (winner) {
-      this.winnerAnnouncement.textContent = `🎉 ${winner.name} WINS!`;
+      this.winnerAnnouncement.textContent = `${winner.name.toUpperCase()} WINS!`;
       this.winnerSubtitle.textContent = `Winning score: ${winner.finalScore} points`;
     } else {
       this.winnerAnnouncement.textContent = 'ROUND COMPLETE!';
@@ -665,7 +665,7 @@ export class UIManager {
       const tr = document.createElement('tr');
 
       const rankTd = document.createElement('td');
-      rankTd.textContent = idx === 0 ? '🥇 1st' : idx === 1 ? '🥈 2nd' : idx === 2 ? '🥉 3rd' : `${idx + 1}th`;
+      rankTd.textContent = idx === 0 ? '1st' : idx === 1 ? '2nd' : idx === 2 ? '3rd' : `${idx + 1}th`;
 
       const playerTd = document.createElement('td');
       playerTd.innerHTML = `<span style="color:${r.color?.css || '#06b6d4'}">●</span> ${r.name} ${r.wasFinalHolder ? '<small style="color:#ef4444">(Penalty -40)</small>' : ''}`;
@@ -761,7 +761,7 @@ export class UIManager {
     this.phaseBanner.classList.add('warning');
 
     if (this.phaseTitle) {
-      this.phaseTitle.textContent = '⚡ BONUS PHASE INCOMING';
+      this.phaseTitle.textContent = 'BONUS PHASE INCOMING';
     }
     if (this.phaseDescription) {
       this.phaseDescription.textContent = `${data.name || 'Special Scoring'} starts in 5 seconds!`;
@@ -778,7 +778,7 @@ export class UIManager {
     this.phaseBanner.classList.add('active');
 
     if (this.phaseTitle) {
-      this.phaseTitle.textContent = `🔥 ${data.name || 'BONUS PHASE'}`;
+      this.phaseTitle.textContent = data.name || 'BONUS PHASE';
     }
     if (this.phaseDescription) {
       this.phaseDescription.textContent = data.description || 'Special scoring rules active!';

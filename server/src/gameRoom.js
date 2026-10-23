@@ -816,7 +816,7 @@ export class GameRoom {
 
     // 2. Only host can change speed when multiple players are in the room
     if (this.players.size > 1 && socketId !== this.hostSocketId) {
-      return { success: false, reason: 'Only the room host (👑) can change game speed.' };
+      return { success: false, reason: 'Only the room host can change game speed.' };
     }
 
     let newSpeed = this.baseSpeed;

@@ -451,7 +451,7 @@ export class ArenaScene extends Phaser.Scene {
     this.socketClient.on(EVENTS.SERVER.GAME_STARTED, (data) => {
       this.flagHolderId = data.flagHolderId;
       soundSynth.startBGM();
-      this.uiManager.showToast('🚀 MATCH STARTED! JUMP & PLATFORM TO TAG THE FLAG!', 'bonus');
+      this.uiManager.showToast('MATCH STARTED: TAG THE FLAG HOLDER', 'bonus');
     });
 
     // 6. Match end
