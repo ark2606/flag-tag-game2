@@ -13,12 +13,23 @@ export class SocketClient {
     // 1. Explicit environment variable (for production deployment on Vercel connecting to Render)
     // 2. Or relative path if frontend is served by Node.js server
     // 3. Or localhost:3001 default for local dev
-    const envUrl = import.meta.env.VITE_SERVER_URL;
-    const defaultUrl = window.location.port === '3000'
-      ? `http://${window.location.hostname}:3001`
-      : window.location.origin;
+    const envUrl = import.meta.env.VITE_SERVER_URL?.trim().replace(/\/+$/, '');
+    let defaultUrl;
+    if (import.meta.env.DEV) {
+      // In local development, Node server is on port 3001
+      const isServerPort = window.location.port === '3001';
+      defaultUrl = isServerPort
+        ? window.location.origin
+        : `http://${window.location.hostname}:3001`;
+    } else {
+      defaultUrl = window.location.origin;
+    }
 
     this.serverUrl = envUrl || defaultUrl;
+  }
+
+  get isConnected() {
+    return Boolean(this.socket && this.socket.connected);
   }
 
   connect() {
@@ -26,8 +37,11 @@ export class SocketClient {
 
     this.socket = io(this.serverUrl, {
       transports: ['websocket', 'polling'],
-      reconnectionAttempts: 10,
+      reconnection: true,
+      reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      timeout: 10000,
     });
 
     this.socket.on('connect', () => {
@@ -95,20 +109,97 @@ export class SocketClient {
     }
   }
 
+  /**
+   * Ensures the socket is connected before emitting actions.
+   * If the socket is connecting, waits up to timeoutMs for the connection to establish.
+   */
+  async ensureConnected(timeoutMs = 6000) {
+    if (this.socket?.connected) return true;
+
+    if (!this.socket) {
+      this.connect();
+    }
+
+    if (this.socket.connected) return true;
+
+    return new Promise((resolve) => {
+      let timer = null;
+
+      const onConnect = () => {
+        cleanup();
+        resolve(true);
+      };
+
+      const cleanup = () => {
+        if (timer) clearTimeout(timer);
+        if (this.socket) {
+          this.socket.off('connect', onConnect);
+        }
+      };
+
+      timer = setTimeout(() => {
+        cleanup();
+        resolve(Boolean(this.socket?.connected));
+      }, timeoutMs);
+
+      this.socket.once('connect', onConnect);
+    });
+  }
+
   // --- Client Actions ---
 
-  createRoom(name, config = {}) {
+  async createRoom(name, config = {}) {
+    const connected = await this.ensureConnected(6000);
+    if (!connected) {
+      return {
+        success: false,
+        reason: 'Unable to connect to game server. Please check your internet connection and try again.',
+      };
+    }
+
     return new Promise((resolve) => {
+      let resolved = false;
+      const timer = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          resolve({ success: false, reason: 'Server took too long to create room. Please try again.' });
+        }
+      }, 8000);
+
       this.socket.emit(EVENTS.CLIENT.CREATE_ROOM, { name, config }, (res) => {
-        resolve(res);
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timer);
+          resolve(res || { success: true });
+        }
       });
     });
   }
 
-  joinRoom(code, name) {
+  async joinRoom(code, name) {
+    const connected = await this.ensureConnected(6000);
+    if (!connected) {
+      return {
+        success: false,
+        reason: 'Unable to connect to game server. Please check your internet connection and try again.',
+      };
+    }
+
     return new Promise((resolve) => {
+      let resolved = false;
+      const timer = setTimeout(() => {
+        if (!resolved) {
+          resolved = true;
+          resolve({ success: false, reason: 'Server took too long to join room. Please try again.' });
+        }
+      }, 8000);
+
       this.socket.emit(EVENTS.CLIENT.JOIN_ROOM, { code, name }, (res) => {
-        resolve(res);
+        if (!resolved) {
+          resolved = true;
+          clearTimeout(timer);
+          resolve(res || { success: true });
+        }
       });
     });
   }

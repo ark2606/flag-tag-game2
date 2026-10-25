@@ -189,6 +189,21 @@ input[type="text"]:focus {
   transform: scale(0.97);
 }
 
+.btn:disabled,
+.btn[disabled] {
+  opacity: 0.6;
+  cursor: not-allowed !important;
+  pointer-events: none !important;
+  transform: none !important;
+  box-shadow: none !important;
+}
+
+.btn.btn-loading {
+  opacity: 0.75;
+  cursor: wait !important;
+  pointer-events: none !important;
+}
+
 .btn-primary {
   background: linear-gradient(135deg, #06b6d4, #0284c7);
   color: #fff;

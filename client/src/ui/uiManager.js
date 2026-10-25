@@ -122,6 +122,25 @@ export class UIManager {
       this.joinCodeInput.focus();
     }
 
+    // Keyboard enter shortcuts on text inputs
+    if (this.playerNameInput) {
+      this.playerNameInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          this.createRoomBtn?.click();
+        }
+      });
+    }
+
+    if (this.joinCodeInput) {
+      this.joinCodeInput.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          this.joinRoomBtn?.click();
+        }
+      });
+    }
+
     // Sound toggle listener
     if (this.soundToggleBtn) {
       this.soundToggleBtn.textContent = soundSynth.isMuted ? 'MUTE' : 'SND';
@@ -477,6 +496,36 @@ export class UIManager {
     setTimeout(checkOrientation, 150);
   }
 
+  setCreateRoomLoading(loading) {
+    if (!this.createRoomBtn) return;
+    this.createRoomBtn.disabled = loading;
+    if (loading) {
+      if (!this.createRoomBtn.dataset.originalText) {
+        this.createRoomBtn.dataset.originalText = this.createRoomBtn.textContent.trim();
+      }
+      this.createRoomBtn.textContent = 'Creating Room...';
+      this.createRoomBtn.classList.add('btn-loading');
+    } else {
+      this.createRoomBtn.textContent = this.createRoomBtn.dataset.originalText || 'Create Private Room';
+      this.createRoomBtn.classList.remove('btn-loading');
+    }
+  }
+
+  setJoinRoomLoading(loading) {
+    if (!this.joinRoomBtn) return;
+    this.joinRoomBtn.disabled = loading;
+    if (loading) {
+      if (!this.joinRoomBtn.dataset.originalText) {
+        this.joinRoomBtn.dataset.originalText = this.joinRoomBtn.textContent.trim();
+      }
+      this.joinRoomBtn.textContent = 'Joining...';
+      this.joinRoomBtn.classList.add('btn-loading');
+    } else {
+      this.joinRoomBtn.textContent = this.joinRoomBtn.dataset.originalText || 'Join';
+      this.joinRoomBtn.classList.remove('btn-loading');
+    }
+  }
+
   getPlayerName() {
     const name = this.playerNameInput.value.trim() || 'Player';
     localStorage.setItem('flagtag_name', name);
@@ -492,6 +541,8 @@ export class UIManager {
     if (screenName === 'menu' && this.mainMenu) {
       this.mainMenu.classList.add('active');
       this.inGameHud.classList.add('hidden');
+      this.setCreateRoomLoading(false);
+      this.setJoinRoomLoading(false);
     } else if (screenName === 'lobby' && this.lobbyScreen) {
       this.lobbyScreen.classList.add('active');
       this.inGameHud.classList.add('hidden');

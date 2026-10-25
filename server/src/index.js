@@ -82,6 +82,10 @@ io.on('connection', socket => {
   // Create room
   socket.on(EVENTS.CLIENT.CREATE_ROOM, (data, callback) => {
     try {
+      const oldCode = roomManager.playerRoomMap.get(socket.id);
+      if (oldCode) {
+        socket.leave(oldCode);
+      }
       const name = data?.name || 'Host';
       const result = roomManager.createRoom(socket.id, name, data?.config || {});
 
@@ -98,12 +102,17 @@ io.on('connection', socket => {
     } catch (err) {
       console.error('Error creating room:', err);
       socket.emit(EVENTS.SERVER.ROOM_ERROR, { message: 'Internal error creating room.' });
+      if (typeof callback === 'function') callback({ success: false, reason: 'Internal error creating room.' });
     }
   });
 
   // Join room
   socket.on(EVENTS.CLIENT.JOIN_ROOM, (data, callback) => {
     try {
+      const oldCode = roomManager.playerRoomMap.get(socket.id);
+      if (oldCode) {
+        socket.leave(oldCode);
+      }
       const { code, name } = data || {};
       const result = roomManager.joinRoom(socket.id, code, name);
 
@@ -119,6 +128,7 @@ io.on('connection', socket => {
     } catch (err) {
       console.error('Error joining room:', err);
       socket.emit(EVENTS.SERVER.ROOM_ERROR, { message: 'Internal error joining room.' });
+      if (typeof callback === 'function') callback({ success: false, reason: 'Internal error joining room.' });
     }
   });
 

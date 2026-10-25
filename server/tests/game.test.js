@@ -725,4 +725,28 @@ test('27. Snapshot broadcast contains authoritative player names and colors for 
   assert.ok(typeof p2Snap.colorHex === 'number');
 });
 
+test('28. Room creation leaves prior room cleanly', () => {
+  const io = createMockIO();
+  const manager = new RoomManager(io);
+
+  // Player creates first room
+  const res1 = manager.createRoom('socket-p1', 'Alice');
+  assert.equal(res1.success, true);
+  const code1 = res1.code;
+  assert.equal(manager.playerRoomMap.get('socket-p1'), code1);
+  assert.ok(manager.rooms.has(code1));
+
+  // Player creates second room without manually leaving
+  const res2 = manager.createRoom('socket-p1', 'Alice');
+  assert.equal(res2.success, true);
+  const code2 = res2.code;
+  assert.notEqual(code1, code2);
+  assert.equal(manager.playerRoomMap.get('socket-p1'), code2);
+  assert.ok(manager.rooms.has(code2));
+
+  // Old room should be removed since p1 was the only player
+  assert.equal(manager.rooms.has(code1), false, 'Empty previous room should be cleaned up');
+});
+
+
 

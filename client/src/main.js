@@ -119,6 +119,8 @@ class GameApp {
       this.myId = data.socketId;
       const scene = this.phaserGame.scene.getScene('ArenaScene');
       if (scene) scene.myId = this.myId;
+      this.ui.setCreateRoomLoading(false);
+      this.ui.setJoinRoomLoading(false);
     });
 
     this.network.on('ping_update', (pingMs) => {
@@ -224,10 +226,19 @@ class GameApp {
 
     this.network.on(EVENTS.SERVER.ROOM_ERROR, (err) => {
       this.ui.showToast(`${err.message || 'Error occurred'}`, 'error');
+      this.ui.setCreateRoomLoading(false);
+      this.ui.setJoinRoomLoading(false);
     });
 
     this.network.on('disconnect', () => {
       this.ui.showToast('Disconnected from server. Reconnecting...', 'error');
+      this.ui.setCreateRoomLoading(false);
+      this.ui.setJoinRoomLoading(false);
+    });
+
+    this.network.on('connect_error', () => {
+      this.ui.setCreateRoomLoading(false);
+      this.ui.setJoinRoomLoading(false);
     });
   }
 
@@ -242,23 +253,31 @@ class GameApp {
 
     // Create Room
     this.ui.createRoomBtn.addEventListener('click', async () => {
+      if (this.ui.createRoomBtn.disabled) return;
       const name = this.ui.getPlayerName();
-      this.ui.createRoomBtn.disabled = true;
+      this.ui.setCreateRoomLoading(true);
 
-      const customConfig = {
-        match: { ROUND_DURATION: this.ui.selectedTimer || 120 },
-        player: { BASE_SPEED: Math.round(440 * (this.ui.currentMult || 1.0)) },
-      };
+      try {
+        const customConfig = {
+          match: { ROUND_DURATION: Number.isFinite(this.ui.selectedTimer) ? this.ui.selectedTimer : 120 },
+          player: { BASE_SPEED: Number.isFinite(this.ui.currentMult) ? Math.round(440 * this.ui.currentMult) : 440 },
+        };
 
-      const res = await this.network.createRoom(name, customConfig);
-      this.ui.createRoomBtn.disabled = false;
-      if (!res.success) {
-        this.ui.showToast(`${res.reason || 'Could not create room'}`, 'error');
+        const res = await this.network.createRoom(name, customConfig);
+        if (!res || !res.success) {
+          this.ui.showToast(`${res?.reason || 'Could not create room'}`, 'error');
+        }
+      } catch (err) {
+        console.error('Error creating room:', err);
+        this.ui.showToast('Could not create room. Please try again.', 'error');
+      } finally {
+        this.ui.setCreateRoomLoading(false);
       }
     });
 
     // Join Room
     this.ui.joinRoomBtn.addEventListener('click', async () => {
+      if (this.ui.joinRoomBtn.disabled) return;
       const code = this.ui.joinCodeInput.value.trim().toUpperCase();
       const name = this.ui.getPlayerName();
 
@@ -266,17 +285,24 @@ class GameApp {
         return this.ui.showToast('Please enter a room code.', 'error');
       }
 
-      this.ui.joinRoomBtn.disabled = true;
-      const res = await this.network.joinRoom(code, name);
-      this.ui.joinRoomBtn.disabled = false;
-      if (!res.success) {
-        this.ui.showToast(`${res.reason || 'Could not join room'}`, 'error');
+      this.ui.setJoinRoomLoading(true);
+      try {
+        const res = await this.network.joinRoom(code, name);
+        if (!res || !res.success) {
+          this.ui.showToast(`${res?.reason || 'Could not join room'}`, 'error');
+        }
+      } catch (err) {
+        console.error('Error joining room:', err);
+        this.ui.showToast('Could not join room. Please try again.', 'error');
+      } finally {
+        this.ui.setJoinRoomLoading(false);
       }
     });
 
     // Leave Room
     this.ui.leaveRoomBtn.addEventListener('click', () => {
       this.pendingStartOnLandscape = false;
+      this.currentRoomState = null;
       this.network.leaveRoom();
       this.ui.showScreen('menu');
     });
@@ -284,6 +310,7 @@ class GameApp {
     // Handle Leave Room from Game Over Alone / Rotate overlay
     this.ui.onLeaveRoomRequest = () => {
       this.pendingStartOnLandscape = false;
+      this.currentRoomState = null;
       this.network.leaveRoom();
       this.ui.showScreen('menu');
     };
