@@ -713,7 +713,7 @@ export class GameRoom {
       }
 
       const floorY = ARENA.GROUND_Y - PLAYER_CONFIG.RADIUS;
-      if (!springTriggered && newY >= floorY) {
+      if (!springTriggered && player.vy >= 0 && newY >= floorY) {
         newY = floorY;
         player.vy = 0;
         groundedThisFrame = true;
@@ -723,8 +723,8 @@ export class GameRoom {
       // This catches the case when walking horizontally onto a spring on the ground or platforms
       if (groundedThisFrame && player.springCooldown <= 0 && !springTriggered) {
         for (const spring of SPRINGS) {
-          const springLeft = spring.x - PLAYER_CONFIG.RADIUS * 0.5;
-          const springRight = spring.x + spring.width + PLAYER_CONFIG.RADIUS * 0.5;
+          const springLeft = spring.x - PLAYER_CONFIG.RADIUS * 0.8;
+          const springRight = spring.x + spring.width + PLAYER_CONFIG.RADIUS * 0.8;
           const springTop = spring.y;
           const springBottom = spring.y + spring.height;
           const playerFeet = newY + PLAYER_CONFIG.RADIUS;
@@ -732,7 +732,7 @@ export class GameRoom {
           // Only trigger if player's horizontal center is over the spring
           // and feet are within the spring's vertical landing bounds
           if (newX >= springLeft && newX <= springRight &&
-              playerFeet >= springTop - 6 && playerFeet <= springBottom + 12) {
+              playerFeet >= springTop - 10 && playerFeet <= springBottom + 16) {
             player.vy = spring.impulse;
             newY = spring.y - PLAYER_CONFIG.RADIUS - 4;
             groundedThisFrame = false;

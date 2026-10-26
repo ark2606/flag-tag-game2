@@ -64,9 +64,9 @@ export function checkSpringPadCollision(prevY, newY, x, radius = PLAYER_CONFIG.R
   const newFeet = newY + radius;
 
   for (const spring of springs) {
-    // Horizontal overlap check with generous tolerance
-    const springLeft = spring.x - radius * 0.5;
-    const springRight = spring.x + spring.width + radius * 0.5;
+    // Horizontal overlap check with generous tolerance (radius * 0.8 so any contact triggers immediately)
+    const springLeft = spring.x - radius * 0.8;
+    const springRight = spring.x + spring.width + radius * 0.8;
     const springTop = spring.y;
     const springBottom = spring.y + spring.height;
 
@@ -76,7 +76,7 @@ export function checkSpringPadCollision(prevY, newY, x, radius = PLAYER_CONFIG.R
 
       // 2. Walking horizontally onto spring or standing on spring pad
       // Check if feet are within spring's vertical bounds (with generous tolerance for platform/ground walking)
-      const standingOnSpring = (newFeet >= springTop - 6 && newFeet <= springBottom + 12);
+      const standingOnSpring = (newFeet >= springTop - 10 && newFeet <= springBottom + 16);
 
       if (downwardHit || standingOnSpring) {
         return spring;

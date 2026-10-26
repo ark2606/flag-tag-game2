@@ -726,24 +726,31 @@ export class ArenaScene extends Phaser.Scene {
   onSpringTriggered(data) {
     const isLocal = (data.playerId === this.myId);
 
-    if (!isLocal) {
-      // Remote player triggered spring: play SFX and tyre bounce tween
-      soundSynth.playSpringBounce();
-      const springObj = this.springGraphics.get(data.springId);
-      if (springObj) {
-        this.tweens.add({
-          targets: springObj.container,
-          scaleY: 0.35,
-          duration: 50,
-          yoyo: true,
-          ease: 'Quad.easeInOut',
-        });
-      }
-    } else {
+    // Play spring compression animation and sound
+    soundSynth.playSpringBounce();
+    const springObj = this.springGraphics.get(data.springId);
+    if (springObj) {
+      this.tweens.add({
+        targets: springObj.container,
+        scaleY: 0.35,
+        duration: 50,
+        yoyo: true,
+        ease: 'Quad.easeInOut',
+      });
+    }
+
+    if (isLocal) {
       // Authoritatively ensure velocity and reset cooldown
       if (this.localPredictedPos) {
         this.localPredictedPos.vy = data.impulse;
         this.localPredictedPos.isGrounded = false;
+
+        // If client was still near or on the floor, guarantee upward launch position
+        const floorY = ARENA.GROUND_Y - PLAYER_CONFIG.RADIUS;
+        if (this.localPredictedPos.y >= floorY - 6) {
+          const spring = SPRINGS.find(s => s.id === data.springId);
+          this.localPredictedPos.y = (spring ? spring.y : 935) - PLAYER_CONFIG.RADIUS - 6;
+        }
       }
       this.localSpringCooldown = PHYSICS_CONFIG.COOLDOWN_AFTER_BOUNCE;
     }
@@ -829,14 +836,14 @@ export class ArenaScene extends Phaser.Scene {
               const feetNew = newY + PLAYER_CONFIG.RADIUS;
 
               for (const spring of SPRINGS) {
-                const springLeft = spring.x - PLAYER_CONFIG.RADIUS * 0.5;
-                const springRight = spring.x + spring.width + PLAYER_CONFIG.RADIUS * 0.5;
+                const springLeft = spring.x - PLAYER_CONFIG.RADIUS * 0.8;
+                const springRight = spring.x + spring.width + PLAYER_CONFIG.RADIUS * 0.8;
                 const springTop = spring.y;
                 const springBottom = spring.y + spring.height;
 
                 if (this.localPredictedPos.x >= springLeft && this.localPredictedPos.x <= springRight) {
                   const downwardHit = (feetPrev <= springTop + 16 && feetNew >= springTop - 8);
-                  const standingOnSpring = (feetNew >= springTop - 6 && feetNew <= springBottom + 12);
+                  const standingOnSpring = (feetNew >= springTop - 10 && feetNew <= springBottom + 16);
 
                   if (downwardHit || standingOnSpring) {
                     localSpringHit = spring;
@@ -885,8 +892,8 @@ export class ArenaScene extends Phaser.Scene {
               }
             }
 
-            // Floor boundary (skip when launching from a spring)
-            if (!localSpringHit) {
+            // Floor boundary (skip when launching from a spring or moving upward)
+            if (!localSpringHit && this.localPredictedPos.vy >= 0) {
               const floorY = ARENA.GROUND_Y - PLAYER_CONFIG.RADIUS;
               if (newY >= floorY) {
                 newY = floorY;
@@ -903,7 +910,13 @@ export class ArenaScene extends Phaser.Scene {
             }
 
             this.localPredictedPos.y = newY;
-            this.localPredictedPos.isGrounded = groundedThisFrame || serverP.g;
+
+            // Never let a lagging/stale server snapshot mark us grounded if launching upward
+            if (this.localPredictedPos.vy < -20 || this.localSpringCooldown > 0) {
+              this.localPredictedPos.isGrounded = false;
+            } else {
+              this.localPredictedPos.isGrounded = groundedThisFrame;
+            }
 
             // Zero-Lag Client Reconciliation:
             // Do NOT drag player backward while actively moving (ix !== 0)!
@@ -912,8 +925,10 @@ export class ArenaScene extends Phaser.Scene {
             const dy = serverP.y - this.localPredictedPos.y;
             const dist = Math.hypot(dx, dy);
 
-            if (dist > 140) {
-              // Snap on large divergence (e.g. spring pad bounce, teleport)
+            const inSpringLaunch = (this.localSpringCooldown > 0 || this.localPredictedPos.vy < -150 || (serverP.vy || 0) < -150);
+
+            if (dist > 160 && !inSpringLaunch) {
+              // Snap on large divergence only when NOT launching from a spring pad
               this.localPredictedPos.x = serverP.x;
               this.localPredictedPos.y = serverP.y;
               this.localPredictedPos.vy = serverP.vy || 0;
@@ -924,8 +939,8 @@ export class ArenaScene extends Phaser.Scene {
                 const reconcileRate = 1 - Math.exp(-24 * dt);
                 this.localPredictedPos.x += dx * reconcileRate;
               }
-              // Grounded vertical sync: keep feet aligned with surface
-              if (this.localPredictedPos.isGrounded && serverP.g && !this.currentJumpRequested) {
+              // Grounded vertical sync: keep feet aligned with surface ONLY when both agree player is grounded on same level
+              if (this.localPredictedPos.isGrounded && serverP.g && !this.currentJumpRequested && Math.abs(dy) < 20 && !inSpringLaunch) {
                 const reconcileY = 1 - Math.exp(-24 * dt);
                 this.localPredictedPos.y += dy * reconcileY;
               }
