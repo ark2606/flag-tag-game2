@@ -19,11 +19,15 @@ export class ArenaScene extends Phaser.Scene {
     this.springGraphics = new Map(); // springId -> container
     this.flagContainer = null;
     this.flagGlowRing = null;
+    this.isFlagSurgeActive = false;
 
-    // Input tracking
+    // Input tracking (Keyboard, Pointer / Mouse Among Us style, and Touch)
     this.cursors = null;
     this.wasd = null;
     this.spaceKey = null;
+    this.pointerIsDown = false;
+    this.pointerWorldX = 0;
+    this.pointerWorldY = 0;
     this.mobileJumpPressed = false;
     this.mobileDropPressed = false;
     this.lastSentInput = { x: 0, jump: false, dropDown: false };
@@ -34,6 +38,7 @@ export class ArenaScene extends Phaser.Scene {
     this.currentInputX = 0;
     this.currentJumpRequested = false;
     this.currentDropDown = false;
+    this.localSpringCooldown = 0;
     this.effectiveSpeed = 440;
     this.isMatchPlaying = false;
   }
@@ -177,6 +182,48 @@ export class ArenaScene extends Phaser.Scene {
       mobileDropBtn.addEventListener('pointercancel', clearDrop);
       mobileDropBtn.addEventListener('pointerleave', clearDrop);
     }
+
+    // 9. Pointer / Mouse Click-and-Drag Controls (Immediate reaction, Among Us style)
+    this.input.on('pointerdown', (pointer) => {
+      this.pointerIsDown = true;
+      this.pointerWorldX = pointer.worldX;
+      this.pointerWorldY = pointer.worldY;
+      this.showClickEffect(pointer.worldX, pointer.worldY);
+    });
+
+    this.input.on('pointermove', (pointer) => {
+      if (this.pointerIsDown) {
+        this.pointerWorldX = pointer.worldX;
+        this.pointerWorldY = pointer.worldY;
+      }
+    });
+
+    this.input.on('pointerup', () => {
+      this.pointerIsDown = false;
+    });
+
+    this.input.on('pointercancel', () => {
+      this.pointerIsDown = false;
+    });
+  }
+
+  showClickEffect(x, y) {
+    const marker = this.add.graphics();
+    marker.setPosition(x, y);
+    marker.lineStyle(2, 0x38bdf8, 0.9);
+    marker.strokeCircle(0, 0, 18);
+    marker.fillStyle(0x38bdf8, 0.25);
+    marker.fillCircle(0, 0, 18);
+    marker.setDepth(50);
+    this.tweens.add({
+      targets: marker,
+      scaleX: 0.3,
+      scaleY: 0.3,
+      alpha: 0,
+      duration: 280,
+      ease: 'Quad.easeOut',
+      onComplete: () => marker.destroy(),
+    });
   }
 
   fitCameraToScreen() {
@@ -455,6 +502,23 @@ export class ArenaScene extends Phaser.Scene {
       }
     });
 
+    // 5. Golden Flag Surge events (secret gaining twist)
+    this.socketClient.on(EVENTS.SERVER.FLAG_SURGE_STARTED, (data) => {
+      this.isFlagSurgeActive = true;
+      soundSynth.playSurgeStart();
+      if (this.uiManager?.showSurgeActive) {
+        this.uiManager.showSurgeActive(data);
+      }
+    });
+
+    this.socketClient.on(EVENTS.SERVER.FLAG_SURGE_ENDED, () => {
+      this.isFlagSurgeActive = false;
+      soundSynth.playSurgeEnd();
+      if (this.uiManager?.showSurgeEnded) {
+        this.uiManager.showSurgeEnded();
+      }
+    });
+
     // Speed update listener
     this.socketClient.on(EVENTS.SERVER.SPEED_UPDATED, (data) => {
       this.effectiveSpeed = data.effectiveSpeed || data.baseSpeed || 440;
@@ -465,13 +529,15 @@ export class ArenaScene extends Phaser.Scene {
       if (room.status !== 'playing') {
         this.isMatchPlaying = false;
         this.localPredictedPos = null;
+        this.isFlagSurgeActive = false;
       }
     });
 
-    // 5. Match start
+    // 6. Match start
     this.socketClient.on(EVENTS.SERVER.GAME_STARTED, (data) => {
       this.flagHolderId = data.flagHolderId;
       this.isMatchPlaying = true;
+      this.isFlagSurgeActive = false;
       if (data.effectiveSpeed) {
         this.effectiveSpeed = data.effectiveSpeed;
       }
@@ -479,9 +545,10 @@ export class ArenaScene extends Phaser.Scene {
       this.uiManager.showToast('MATCH STARTED: TAG THE FLAG HOLDER', 'bonus');
     });
 
-    // 6. Match end
+    // 7. Match end
     this.socketClient.on(EVENTS.SERVER.GAME_ENDED, () => {
       this.isMatchPlaying = false;
+      this.isFlagSurgeActive = false;
       this.localPredictedPos = null;
       soundSynth.stopBGM();
       if (this.uiManager?.hidePhaseActive) {
@@ -493,6 +560,21 @@ export class ArenaScene extends Phaser.Scene {
   handleSnapshot(snap) {
     this.flagHolderId = snap.f;
     this.uiManager.updateHudTimer(snap.t);
+
+    // Sync authoritative surge flag state
+    if (typeof snap.sg === 'number') {
+      const serverSurge = snap.sg === 1;
+      if (serverSurge !== this.isFlagSurgeActive) {
+        this.isFlagSurgeActive = serverSurge;
+        if (serverSurge) {
+          soundSynth.playSurgeStart();
+          this.uiManager?.showSurgeActive();
+        } else {
+          soundSynth.playSurgeEnd();
+          this.uiManager?.showSurgeEnded();
+        }
+      }
+    }
 
     const activeIds = new Set();
 
@@ -535,7 +617,7 @@ export class ArenaScene extends Phaser.Scene {
     // Update HUD flag holder label
     const holderVisual = this.playersMap.get(this.flagHolderId);
     if (holderVisual) {
-      this.uiManager.updateHudFlagHolder(holderVisual.name, holderVisual.colorCss);
+      this.uiManager.updateHudFlagHolder(holderVisual.name, holderVisual.colorCss, this.isFlagSurgeActive);
     } else {
       this.uiManager.updateHudFlagHolder(null);
     }
@@ -642,25 +724,28 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   onSpringTriggered(data) {
-    // Resonant spring launch SFX
-    soundSynth.playSpringBounce();
+    const isLocal = (data.playerId === this.myId);
 
-    // Synchronize local prediction with authoritative spring bounce impulse
-    if (data.playerId === this.myId && this.localPredictedPos) {
-      this.localPredictedPos.vy = data.impulse;
-      this.localPredictedPos.isGrounded = false;
-    }
-
-    // Visual compression & rebound animation of tyre pad
-    const springObj = this.springGraphics.get(data.springId);
-    if (springObj) {
-      this.tweens.add({
-        targets: springObj.container,
-        scaleY: 0.35,
-        duration: 50,
-        yoyo: true,
-        ease: 'Quad.easeInOut',
-      });
+    if (!isLocal) {
+      // Remote player triggered spring: play SFX and tyre bounce tween
+      soundSynth.playSpringBounce();
+      const springObj = this.springGraphics.get(data.springId);
+      if (springObj) {
+        this.tweens.add({
+          targets: springObj.container,
+          scaleY: 0.35,
+          duration: 50,
+          yoyo: true,
+          ease: 'Quad.easeInOut',
+        });
+      }
+    } else {
+      // Authoritatively ensure velocity and reset cooldown
+      if (this.localPredictedPos) {
+        this.localPredictedPos.vy = data.impulse;
+        this.localPredictedPos.isGrounded = false;
+      }
+      this.localSpringCooldown = PHYSICS_CONFIG.COOLDOWN_AFTER_BOUNCE;
     }
 
     // Spark particles centered directly at tyre pad & player feet (does not fly off-screen)
@@ -685,13 +770,16 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   update(time, delta) {
-    const dt = delta / 1000;
+    // Clamp delta-time to 50ms to prevent spiral-of-death or lag-warp on background tab switch
+    const dt = Math.min(delta / 1000, 0.05);
+
+    // Cooldown decrement for spring launchers
+    if (this.localSpringCooldown > 0) {
+      this.localSpringCooldown -= dt;
+    }
 
     // 1. Process local input & transmit to server
     this.handleInput(dt);
-
-    // 2. Interpolate player positions smoothly
-    const lerpFactor = Math.min(1, dt * 24);
 
     for (const [id, visual] of this.playersMap.entries()) {
       const serverP = this.serverPlayerStates.get(id);
@@ -722,6 +810,7 @@ export class ArenaScene extends Phaser.Scene {
             if (this.currentJumpRequested && this.localPredictedPos.isGrounded) {
               this.localPredictedPos.vy = PHYSICS_CONFIG.JUMP_VELOCITY;
               this.localPredictedPos.isGrounded = false;
+              soundSynth.playJump();
             }
 
             // 3. Gravitational acceleration
@@ -733,9 +822,52 @@ export class ArenaScene extends Phaser.Scene {
             const prevY = this.localPredictedPos.y;
             let newY = prevY + this.localPredictedPos.vy * dt;
 
+            // 4. Spring Pad / Tyre Launcher Prediction (immediate zero-lag reaction on walk-through or landing)
+            let localSpringHit = null;
+            if (this.localSpringCooldown <= 0) {
+              const feetPrev = prevY + PLAYER_CONFIG.RADIUS;
+              const feetNew = newY + PLAYER_CONFIG.RADIUS;
+
+              for (const spring of SPRINGS) {
+                const springLeft = spring.x - PLAYER_CONFIG.RADIUS * 0.5;
+                const springRight = spring.x + spring.width + PLAYER_CONFIG.RADIUS * 0.5;
+                const springTop = spring.y;
+                const springBottom = spring.y + spring.height;
+
+                if (this.localPredictedPos.x >= springLeft && this.localPredictedPos.x <= springRight) {
+                  const downwardHit = (feetPrev <= springTop + 16 && feetNew >= springTop - 8);
+                  const standingOnSpring = (feetNew >= springTop - 6 && feetNew <= springBottom + 12);
+
+                  if (downwardHit || standingOnSpring) {
+                    localSpringHit = spring;
+                    break;
+                  }
+                }
+              }
+
+              if (localSpringHit) {
+                this.localPredictedPos.vy = localSpringHit.impulse;
+                newY = localSpringHit.y - PLAYER_CONFIG.RADIUS - 4;
+                this.localPredictedPos.isGrounded = false;
+                this.localSpringCooldown = PHYSICS_CONFIG.COOLDOWN_AFTER_BOUNCE;
+
+                soundSynth.playSpringBounce();
+                const springObj = this.springGraphics.get(localSpringHit.id);
+                if (springObj) {
+                  this.tweens.add({
+                    targets: springObj.container,
+                    scaleY: 0.35,
+                    duration: 50,
+                    yoyo: true,
+                    ease: 'Quad.easeInOut',
+                  });
+                }
+              }
+            }
+
             // One-way platform landing prediction
             let groundedThisFrame = false;
-            if (this.localPredictedPos.vy >= 0 && !this.currentDropDown) {
+            if (!localSpringHit && this.localPredictedPos.vy >= 0 && !this.currentDropDown) {
               for (const plat of PLATFORMS) {
                 const platTop = plat.y;
                 const feetPrev = prevY + PLAYER_CONFIG.RADIUS;
@@ -753,12 +885,14 @@ export class ArenaScene extends Phaser.Scene {
               }
             }
 
-            // Floor boundary
-            const floorY = ARENA.GROUND_Y - PLAYER_CONFIG.RADIUS;
-            if (newY >= floorY) {
-              newY = floorY;
-              this.localPredictedPos.vy = 0;
-              groundedThisFrame = true;
+            // Floor boundary (skip when launching from a spring)
+            if (!localSpringHit) {
+              const floorY = ARENA.GROUND_Y - PLAYER_CONFIG.RADIUS;
+              if (newY >= floorY) {
+                newY = floorY;
+                this.localPredictedPos.vy = 0;
+                groundedThisFrame = true;
+              }
             }
 
             // Ceiling boundary
@@ -771,21 +905,30 @@ export class ArenaScene extends Phaser.Scene {
             this.localPredictedPos.y = newY;
             this.localPredictedPos.isGrounded = groundedThisFrame || serverP.g;
 
-            // Reconcile softly with server authoritative position
+            // Zero-Lag Client Reconciliation:
+            // Do NOT drag player backward while actively moving (ix !== 0)!
+            // Only reconcile horizontal drift when player is idle / releasing controls.
             const dx = serverP.x - this.localPredictedPos.x;
             const dy = serverP.y - this.localPredictedPos.y;
             const dist = Math.hypot(dx, dy);
 
-            if (dist > 80) {
-              // Snap on large divergence (e.g. spring launch or boundary teleport)
+            if (dist > 140) {
+              // Snap on large divergence (e.g. spring pad bounce, teleport)
               this.localPredictedPos.x = serverP.x;
               this.localPredictedPos.y = serverP.y;
-              this.localPredictedPos.vy = serverP.vy;
+              this.localPredictedPos.vy = serverP.vy || 0;
               this.localPredictedPos.isGrounded = serverP.g;
             } else {
-              const reconcileRate = Math.min(1, dt * 10);
-              this.localPredictedPos.x += dx * reconcileRate;
-              this.localPredictedPos.y += dy * reconcileRate;
+              // Smooth exponential stationary ease: eases into server position when not moving
+              if (ix === 0) {
+                const reconcileRate = 1 - Math.exp(-24 * dt);
+                this.localPredictedPos.x += dx * reconcileRate;
+              }
+              // Grounded vertical sync: keep feet aligned with surface
+              if (this.localPredictedPos.isGrounded && serverP.g && !this.currentJumpRequested) {
+                const reconcileY = 1 - Math.exp(-24 * dt);
+                this.localPredictedPos.y += dy * reconcileY;
+              }
             }
 
             visual.container.x = this.localPredictedPos.x;
@@ -800,9 +943,19 @@ export class ArenaScene extends Phaser.Scene {
             visual.container.y = serverP.y;
           }
         } else {
-          // Smooth interpolation for remote players
-          visual.container.x = Phaser.Math.Linear(visual.container.x, serverP.x, lerpFactor);
-          visual.container.y = Phaser.Math.Linear(visual.container.y, serverP.y, lerpFactor);
+          // Frame-rate independent exponential smoothing for remote players (ultra-smooth at 60-144 FPS)
+          const dx = serverP.x - visual.container.x;
+          const dy = serverP.y - visual.container.y;
+          const dist = Math.hypot(dx, dy);
+
+          if (dist > 180) {
+            visual.container.x = serverP.x;
+            visual.container.y = serverP.y;
+          } else {
+            const blend = 1 - Math.exp(-32 * dt);
+            visual.container.x += dx * blend;
+            visual.container.y += dy * blend;
+          }
         }
 
         visual.scoreText.setText(serverP.s);
@@ -854,11 +1007,44 @@ export class ArenaScene extends Phaser.Scene {
     // Pulsing aura ring under player
     this.flagGlowRing.clear();
     this.flagGlowRing.setVisible(true);
-    const pulseRadius = PLAYER_CONFIG.RADIUS + 8 + Math.sin(time / 150) * 4;
-    this.flagGlowRing.lineStyle(3, 0xf59e0b, 0.85);
-    this.flagGlowRing.strokeCircle(hx, hy, pulseRadius);
-    this.flagGlowRing.fillStyle(0xf59e0b, 0.15);
-    this.flagGlowRing.fillCircle(hx, hy, pulseRadius);
+
+    if (this.isFlagSurgeActive) {
+      // Radiant Golden Flag Surge: intense glowing aura, faster pulse, radiant golden outer ring
+      const pulseRadius = PLAYER_CONFIG.RADIUS + 12 + Math.sin(time / 80) * 5;
+      this.flagGlowRing.lineStyle(4, 0xfbbf24, 0.95);
+      this.flagGlowRing.strokeCircle(hx, hy, pulseRadius);
+      this.flagGlowRing.lineStyle(1.5, 0xfef08a, 0.7);
+      this.flagGlowRing.strokeCircle(hx, hy, pulseRadius + 6);
+      this.flagGlowRing.fillStyle(0xf59e0b, 0.28);
+      this.flagGlowRing.fillCircle(hx, hy, pulseRadius);
+
+      // Occasional upward golden spark particle
+      if (Math.random() < 0.25) {
+        const spark = this.add.graphics();
+        const sx = hx + (Math.random() - 0.5) * 36;
+        const sy = hy - PLAYER_CONFIG.RADIUS - 10 + (Math.random() - 0.5) * 10;
+        spark.setPosition(sx, sy);
+        spark.fillStyle(0xfbbf24, 0.9);
+        spark.fillCircle(0, 0, 3 + Math.random() * 2);
+        spark.setDepth(45);
+        this.tweens.add({
+          targets: spark,
+          y: sy - 35 - Math.random() * 20,
+          alpha: 0,
+          scaleX: 0.2,
+          scaleY: 0.2,
+          duration: 400,
+          ease: 'Quad.easeOut',
+          onComplete: () => spark.destroy(),
+        });
+      }
+    } else {
+      const pulseRadius = PLAYER_CONFIG.RADIUS + 8 + Math.sin(time / 150) * 4;
+      this.flagGlowRing.lineStyle(3, 0xf59e0b, 0.85);
+      this.flagGlowRing.strokeCircle(hx, hy, pulseRadius);
+      this.flagGlowRing.fillStyle(0xf59e0b, 0.15);
+      this.flagGlowRing.fillCircle(hx, hy, pulseRadius);
+    }
   }
 
   handleInput(dt) {
@@ -866,7 +1052,7 @@ export class ArenaScene extends Phaser.Scene {
     let jump = false;
     let dropDown = false;
 
-    // Desktop keyboard input
+    // 1. Desktop keyboard input
     if (this.cursors.left.isDown || this.wasd.left.isDown) ix -= 1;
     if (this.cursors.right.isDown || this.wasd.right.isDown) ix += 1;
 
@@ -885,7 +1071,27 @@ export class ArenaScene extends Phaser.Scene {
       dropDown = true;
     }
 
-    // Mobile Virtual Joystick input
+    // 2. Pointer / Mouse Click-to-Move (Immediate reaction, Among Us style)
+    if (this.pointerIsDown) {
+      const localP = this.playersMap.get(this.myId);
+      if (localP) {
+        const px = this.localPredictedPos ? this.localPredictedPos.x : localP.container.x;
+        const py = this.localPredictedPos ? this.localPredictedPos.y : localP.container.y;
+        const dx = this.pointerWorldX - px;
+        const dy = this.pointerWorldY - py;
+
+        if (Math.abs(dx) > 18) {
+          ix = Math.sign(dx);
+        }
+        if (dy < -45) {
+          jump = true;
+        } else if (dy > 45) {
+          dropDown = true;
+        }
+      }
+    }
+
+    // 3. Mobile Virtual Joystick input
     if (this.virtualJoystick) {
       const joy = this.virtualJoystick.getInput();
       if (Math.abs(joy.x) > 0.05) {
@@ -906,19 +1112,14 @@ export class ArenaScene extends Phaser.Scene {
     this.currentJumpRequested = jump;
     this.currentDropDown = dropDown;
 
-    // Sound effect on local jump initiation
-    if (jump && !this.lastSentInput.jump) {
-      soundSynth.playJump();
-    }
-
-    // Send input to server at 30 Hz or immediately on state change
+    // Send input to server at 60 Hz or immediately on state change
     this.inputSendTimer += dt;
     const inputChanged =
       Math.abs(ix - this.lastSentInput.x) > 0.02 ||
       jump !== this.lastSentInput.jump ||
       dropDown !== this.lastSentInput.dropDown;
 
-    if (inputChanged || this.inputSendTimer >= 1 / 30) {
+    if (inputChanged || this.inputSendTimer >= 1 / 60) {
       this.lastSentInput = { x: ix, jump, dropDown };
       this.inputSendTimer = 0;
       this.socketClient.sendInput(ix, 0, jump, dropDown);

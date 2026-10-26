@@ -86,7 +86,14 @@ io.on('connection', socket => {
       if (oldCode) {
         socket.leave(oldCode);
       }
-      const name = data?.name || 'Host';
+      const rawName = data?.name;
+      if (!rawName || typeof rawName !== 'string' || !rawName.trim()) {
+        const errReason = 'A nickname is required to create a room.';
+        socket.emit(EVENTS.SERVER.ROOM_ERROR, { message: errReason });
+        if (typeof callback === 'function') callback({ success: false, reason: errReason });
+        return;
+      }
+      const name = rawName.trim();
       const result = roomManager.createRoom(socket.id, name, data?.config || {});
 
       if (result.success) {
@@ -114,7 +121,13 @@ io.on('connection', socket => {
         socket.leave(oldCode);
       }
       const { code, name } = data || {};
-      const result = roomManager.joinRoom(socket.id, code, name);
+      if (!name || typeof name !== 'string' || !name.trim()) {
+        const errReason = 'A nickname is required to join a room.';
+        socket.emit(EVENTS.SERVER.ROOM_ERROR, { message: errReason });
+        if (typeof callback === 'function') callback({ success: false, reason: errReason });
+        return;
+      }
+      const result = roomManager.joinRoom(socket.id, code, name.trim());
 
       if (result.success) {
         socket.join(result.code);
@@ -195,6 +208,13 @@ io.on('connection', socket => {
     const room = roomManager.getPlayerRoom(socket.id);
     if (!room) {
       if (typeof callback === 'function') callback({ success: false, reason: 'You are not in a room.' });
+      return;
+    }
+
+    if (room.players.size !== 2) {
+      if (typeof callback === 'function') {
+        callback({ success: false, reason: 'Flag toss is only available in 2-player matches.' });
+      }
       return;
     }
 

@@ -61,6 +61,13 @@ class GameApp {
         antialias: true,
         antialiasGL: true,
         roundPixels: false,
+        powerPreference: 'high-performance',
+      },
+      fps: {
+        min: 30,
+        target: 144,
+        forceSetTimeOut: false,
+        smoothStep: true,
       },
       scene: null, // Add scene explicitly with data to avoid empty auto-boot race conditions
     };
@@ -142,6 +149,9 @@ class GameApp {
           this.ui.updateHudTimer(this.currentRoomState.timeRemaining);
         }
       }
+      try {
+        window.history.pushState({ inGame: true }, '', window.location.href);
+      } catch (_) {}
       this.ui.showScreen('lobby');
       this.ui.updateLobby(this.currentRoomState, this.myId);
     });
@@ -154,6 +164,9 @@ class GameApp {
           this.ui.updateHudTimer(this.currentRoomState.timeRemaining);
         }
       }
+      try {
+        window.history.pushState({ inGame: true }, '', window.location.href);
+      } catch (_) {}
       this.ui.showScreen('lobby');
       this.ui.updateLobby(this.currentRoomState, this.myId);
     });
@@ -268,6 +281,8 @@ class GameApp {
     this.ui.createRoomBtn.addEventListener('click', async () => {
       if (this.ui.createRoomBtn.disabled) return;
       const name = this.ui.getPlayerName();
+      if (!name) return; // Disallow room creation without a nickname
+
       this.ui.setCreateRoomLoading(true);
 
       try {
@@ -294,10 +309,16 @@ class GameApp {
     // Join Room
     this.ui.joinRoomBtn.addEventListener('click', async () => {
       if (this.ui.joinRoomBtn.disabled) return;
-      const code = this.ui.joinCodeInput.value.trim().toUpperCase();
       const name = this.ui.getPlayerName();
+      if (!name) return; // Disallow matchmaking/joining without a nickname
 
+      const code = this.ui.joinCodeInput.value.trim().toUpperCase();
       if (!code) {
+        if (this.ui.joinCodeInput) {
+          this.ui.joinCodeInput.focus();
+          this.ui.joinCodeInput.classList.add('input-error');
+          setTimeout(() => this.ui.joinCodeInput?.classList.remove('input-error'), 1500);
+        }
         return this.ui.showToast('Please enter a room code.', 'error');
       }
 
@@ -318,21 +339,55 @@ class GameApp {
       }
     });
 
-    // Leave Room
-    this.ui.leaveRoomBtn.addEventListener('click', () => {
-      this.pendingStartOnLandscape = false;
-      this.currentRoomState = null;
-      this.network.leaveRoom();
-      this.ui.showScreen('menu');
-    });
-
-    // Handle Leave Room from Game Over Alone / Rotate overlay
-    this.ui.onLeaveRoomRequest = () => {
+    // Clean room exit logic
+    const performLeaveRoom = () => {
       this.pendingStartOnLandscape = false;
       this.currentRoomState = null;
       this.network.leaveRoom();
       this.ui.showScreen('menu');
     };
+
+    // Leave Room button with confirmation
+    this.ui.leaveRoomBtn.addEventListener('click', () => {
+      this.ui.showExitConfirmModal(() => {
+        performLeaveRoom();
+      });
+    });
+
+    // In-game Exit button in top scorecard header
+    this.ui.onExitRequest = () => {
+      this.ui.showExitConfirmModal(() => {
+        performLeaveRoom();
+      });
+    };
+
+    // Handle Leave Room from Game Over Alone / Rotate overlay
+    this.ui.onLeaveRoomRequest = () => {
+      this.ui.showExitConfirmModal(() => {
+        performLeaveRoom();
+      });
+    };
+
+    // Intercept accidental tab close or page reload (beforeunload)
+    window.addEventListener('beforeunload', (e) => {
+      if (this.currentRoomState || this.ui.currentScreen === 'game' || this.ui.currentScreen === 'lobby') {
+        e.preventDefault();
+        e.returnValue = '';
+        return '';
+      }
+    });
+
+    // Intercept accidental browser Back button / swipe back gesture (popstate)
+    window.addEventListener('popstate', () => {
+      if (this.currentRoomState || this.ui.currentScreen === 'game' || this.ui.currentScreen === 'lobby' || this.ui.currentScreen === 'results') {
+        try {
+          window.history.pushState({ inGame: true }, '', window.location.href);
+        } catch (_) {}
+        this.ui.showExitConfirmModal(() => {
+          performLeaveRoom();
+        });
+      }
+    });
 
     // Handle Return to Lobby from Game Over Alone
     this.ui.onReturnToLobbyRequest = () => {

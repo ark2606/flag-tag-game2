@@ -75,8 +75,8 @@ export function checkSpringPadCollision(prevY, newY, x, radius = PLAYER_CONFIG.R
       const downwardHit = (prevFeet <= springTop + 16 && newFeet >= springTop - 8);
 
       // 2. Walking horizontally onto spring or standing on spring pad
-      // Check if feet are within spring's vertical bounds (with tolerance)
-      const standingOnSpring = (newFeet >= springTop - 4 && newFeet <= springBottom + 8);
+      // Check if feet are within spring's vertical bounds (with generous tolerance for platform/ground walking)
+      const standingOnSpring = (newFeet >= springTop - 6 && newFeet <= springBottom + 12);
 
       if (downwardHit || standingOnSpring) {
         return spring;

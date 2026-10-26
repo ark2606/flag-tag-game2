@@ -119,14 +119,17 @@ export const SPEED_CONFIG = {
   ],
 };
 
-// Central configurable scoring rules (without the repetitive 5s hold bonus)
+// Central configurable scoring rules
 export const SCORING_CONFIG = {
   ROUND_DURATION: 120,            // default 120 seconds (2 mins)
-  STARTING_BONUS: 30,             // +30 to initial flag holder
-  HOLDER_POINTS_PER_SEC: -2,      // -2 points/sec for flag holder
-  NON_HOLDER_POINTS_PER_SEC: 1,   // +1 point/sec for every non-holder
+  STARTING_SCORE: 0,              // Other players start with 0 points
+  STARTING_BONUS: 20,             // The character who has the flag starts with a 20-point lead!
+  HOLDER_POINTS_PER_SEC: -2,      // Points decrease while keeping the flag (-2 pts/sec)
+  SURGE_HOLDER_POINTS_PER_SEC: 3, // Golden Surge twist: holding the flag GAINS points (+3 pts/sec)!
+  SURGE_NON_HOLDER_POINTS_PER_SEC: -3, // Golden Surge twist: opponents LOSE -3 pts/sec!
+  NON_HOLDER_POINTS_PER_SEC: 1,   // +1 point/sec for every non-holder during normal play
   PASS_BONUS: 5,                  // +5 points to the player who passed it
-  FINAL_HOLDER_PENALTY: -40,      // -40 points to player holding at match end
+  FINAL_HOLDER_PENALTY: 0,        // Penalty at match end is removed (0 penalty)
   SPEED_BOOST_ON_PASS: true,      // speed boost upon successful pass
 };
 
@@ -170,8 +173,8 @@ export const MATCH_CONFIG = {
   COUNTDOWN_DURATION: 3,          // 3 second start countdown
   MIN_PLAYERS: 2,
   MAX_PLAYERS: 8,
-  TICK_RATE: 30,                  // server simulation rate (30 Hz)
-  SNAPSHOT_RATE: 20,              // client sync rate (20 Hz)
+  TICK_RATE: 60,                  // server simulation rate (60 Hz for ultra-smooth movement)
+  SNAPSHOT_RATE: 60,              // client sync rate (60 Hz high-frequency broadcast)
 };
 
 export const ROOM_STATUS = {
@@ -212,6 +215,8 @@ export const EVENTS = {
     PHASE_WARNING: 'game:phase_warning',
     PHASE_STARTED: 'game:phase_started',
     PHASE_ENDED: 'game:phase_ended',
+    FLAG_SURGE_STARTED: 'game:flag_surge_started',
+    FLAG_SURGE_ENDED: 'game:flag_surge_ended',
     SPRING_TRIGGERED: 'game:spring_triggered',
     PONG: 'net:pong',
   },

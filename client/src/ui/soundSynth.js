@@ -204,22 +204,53 @@ class SoundSynth {
     this.init();
     if (!this.ctx) return;
 
-    // Upward frequency sweep (arcade jump)
+    const t = this.ctx.currentTime;
+
+    // 1. Warm, mellow rounded hop tone (pure sine wave with acoustic lowpass filtering)
+    // Starts at a soft warm 150 Hz and gently rises to 250 Hz without high-pitch piercing
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
+    const filter = this.ctx.createBiquadFilter();
 
-    osc.type = 'triangle';
-    osc.frequency.setValueAtTime(220, this.ctx.currentTime);
-    osc.frequency.exponentialRampToValueAtTime(540, this.ctx.currentTime + 0.08);
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(150, t);
+    osc.frequency.exponentialRampToValueAtTime(250, t + 0.05);
+    osc.frequency.linearRampToValueAtTime(180, t + 0.10);
 
-    gain.gain.setValueAtTime(0.22, this.ctx.currentTime);
-    gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + 0.08);
+    // Warm acoustic lowpass filter to remove any harsh harmonics or digital clicks
+    filter.type = 'lowpass';
+    filter.frequency.setValueAtTime(650, t);
+    filter.frequency.linearRampToValueAtTime(350, t + 0.10);
 
-    osc.connect(gain);
+    // Smooth, non-fatiguing volume envelope (gentle attack, soft decay, low gain)
+    gain.gain.setValueAtTime(0.001, t);
+    gain.gain.linearRampToValueAtTime(0.09, t + 0.015);
+    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.10);
+
+    osc.connect(filter);
+    filter.connect(gain);
     gain.connect(this.sfxGain || this.ctx.destination);
 
-    osc.start();
-    osc.stop(this.ctx.currentTime + 0.08);
+    osc.start(t);
+    osc.stop(t + 0.11);
+
+    // 2. Subtle physical takeoff thump (gives tactile weight to the jump without punchiness)
+    const subOsc = this.ctx.createOscillator();
+    const subGain = this.ctx.createGain();
+
+    subOsc.type = 'sine';
+    subOsc.frequency.setValueAtTime(120, t);
+    subOsc.frequency.exponentialRampToValueAtTime(65, t + 0.06);
+
+    subGain.gain.setValueAtTime(0.001, t);
+    subGain.gain.linearRampToValueAtTime(0.05, t + 0.01);
+    subGain.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
+
+    subOsc.connect(subGain);
+    subGain.connect(this.sfxGain || this.ctx.destination);
+
+    subOsc.start(t);
+    subOsc.stop(t + 0.07);
   }
 
   playSpringBounce() {
@@ -339,6 +370,56 @@ class SoundSynth {
 
       osc.start(this.ctx.currentTime + idx * 0.05);
       osc.stop(this.ctx.currentTime + idx * 0.05 + 0.3);
+    });
+  }
+
+  playSurgeStart() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    // Radiant, high-energy golden surge fanfare: G4 -> B4 -> D5 -> G5 -> B5 with bright shimmer
+    const notes = [392.00, 493.88, 587.33, 783.99, 987.77];
+    notes.forEach((freq, idx) => {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(freq, this.ctx.currentTime + idx * 0.04);
+
+      gain.gain.setValueAtTime(0.2, this.ctx.currentTime + idx * 0.04);
+      gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + idx * 0.04 + 0.35);
+
+      osc.connect(gain);
+      gain.connect(this.sfxGain || this.ctx.destination);
+
+      osc.start(this.ctx.currentTime + idx * 0.04);
+      osc.stop(this.ctx.currentTime + idx * 0.04 + 0.35);
+    });
+  }
+
+  playSurgeEnd() {
+    if (this.isMuted) return;
+    this.init();
+    if (!this.ctx) return;
+
+    // Gentle descending chime settling back to normal: D5 -> A4 -> F#4
+    const notes = [587.33, 440.00, 369.99];
+    notes.forEach((freq, idx) => {
+      const osc = this.ctx.createOscillator();
+      const gain = this.ctx.createGain();
+
+      osc.type = 'sine';
+      osc.frequency.setValueAtTime(freq, this.ctx.currentTime + idx * 0.08);
+
+      gain.gain.setValueAtTime(0.15, this.ctx.currentTime + idx * 0.08);
+      gain.gain.exponentialRampToValueAtTime(0.01, this.ctx.currentTime + idx * 0.08 + 0.22);
+
+      osc.connect(gain);
+      gain.connect(this.sfxGain || this.ctx.destination);
+
+      osc.start(this.ctx.currentTime + idx * 0.08);
+      osc.stop(this.ctx.currentTime + idx * 0.08 + 0.22);
     });
   }
 

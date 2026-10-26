@@ -4,6 +4,7 @@ import assert from 'node:assert/strict';
 import { GameRoom } from '../src/gameRoom.js';
 import { RoomManager } from '../src/roomManager.js';
 import {
+  ARENA,
   ROOM_STATUS,
   SCORING_CONFIG,
   PLAYER_CONFIG,
@@ -95,7 +96,7 @@ test('3. Room capacity enforcement (max 8 players)', () => {
   assert.match(overflowRes.reason, /full/i);
 });
 
-test('4. Initial flag assignment and starting bonus', () => {
+test('4. Initial flag assignment and 20-point starting lead for flag holder', () => {
   const io = createMockIO();
   const room = new GameRoom('ROOM1', 'host-1', io);
   room.addPlayer('host-1', 'Alice');
@@ -110,7 +111,7 @@ test('4. Initial flag assignment and starting bonus', () => {
   const nonHolderId = room.flagHolderId === 'host-1' ? 'guest-1' : 'host-1';
   const nonHolder = room.players.get(nonHolderId);
 
-  // Initial holder receives starting bonus (+30)
+  // Character with flag starts with 20 points lead, other players start with 0
   assert.equal(holder.score, SCORING_CONFIG.STARTING_BONUS);
   assert.equal(nonHolder.score, 0);
 });
@@ -294,7 +295,7 @@ test('11. Removal of 5-second hold bonus (no hold bonus awarded)', () => {
   assert.equal(room.uninterruptedHoldTime, undefined);
 });
 
-test('12. End-of-round penalty applied exactly once (-40 points)', () => {
+test('12. End-of-round penalty is removed (0 penalty)', () => {
   const io = createMockIO();
   const room = new GameRoom('ROOM1', 'p1', io);
   room.addPlayer('p1', 'Alice');
@@ -310,13 +311,12 @@ test('12. End-of-round penalty applied exactly once (-40 points)', () => {
   room.endMatch();
 
   assert.equal(room.status, ROOM_STATUS.ENDED);
-  // p1 was holding when match ended: 50 - 40 = 10
-  assert.equal(p1.score, 10);
-  assert.equal(room.finalPenaltyApplied, true);
+  // Penalty is removed: p1 score remains 50
+  assert.equal(p1.score, 50);
 
-  // Calling endMatch again must not re-apply penalty
+  // Calling endMatch again must not change score
   room.endMatch();
-  assert.equal(p1.score, 10);
+  assert.equal(p1.score, 50);
 });
 
 test('13. Round reset and Rematch', () => {
@@ -415,7 +415,7 @@ test('16. Speed adjustment panel controls and server authority', () => {
   assert.equal(room.speedMultiplier, Math.round((604 / 440) * 100) / 100);
 });
 
-test('17. Authoritative flag toss to select initial flag holder and award starting bonus', () => {
+test('17. Authoritative flag toss selects initial flag holder and awards 20-point starting lead', () => {
   const io = createMockIO();
   const room = new GameRoom('ROOM1', 'host-1', io);
   room.addPlayer('host-1', 'Alice');
@@ -426,7 +426,7 @@ test('17. Authoritative flag toss to select initial flag holder and award starti
   assert.ok(toss);
   assert.ok(['host-1', 'guest-1'].includes(toss.winnerId));
   assert.ok(['Alice', 'Bob'].includes(toss.winnerName));
-  assert.equal(toss.startingBonus, 30);
+  assert.equal(toss.startingBonus, 20);
   assert.equal(toss.candidates.length, 2);
 
   // Check event emitted to room
@@ -434,11 +434,15 @@ test('17. Authoritative flag toss to select initial flag holder and award starti
   assert.ok(tossEvent);
   assert.equal(tossEvent.payload.winnerId, toss.winnerId);
 
-  // Start match - toss winner must receive flag and +30 starting bonus
+  // Start match - toss winner must receive flag and 20-point lead
   room.startMatch();
   assert.equal(room.flagHolderId, toss.winnerId);
   const winnerPlayer = room.players.get(toss.winnerId);
-  assert.equal(winnerPlayer.score, 30);
+  assert.equal(winnerPlayer.score, 20);
+
+  const nonWinnerId = toss.winnerId === 'host-1' ? 'guest-1' : 'host-1';
+  const nonWinner = room.players.get(nonWinnerId);
+  assert.equal(nonWinner.score, 0);
 });
 
 test('18. Speed adjustment rejection during active gameplay (strict pre-game only)', () => {
@@ -528,7 +532,31 @@ test('21. Spring pad impulse and anti-bounce cooldown', () => {
   const hitSpring = checkSpringPadCollision(prevY, newY, spring.x + 10, PLAYER_CONFIG.RADIUS, [spring]);
   assert.equal(hitSpring?.id, spring.id);
 
-  // 2. Integration in room simulation
+  // 1b. Walking horizontally on the ground floor across spring pad
+  const floorY = ARENA.GROUND_Y - PLAYER_CONFIG.RADIUS;
+  const walkHitSpring = checkSpringPadCollision(floorY, floorY, spring.x + 10, PLAYER_CONFIG.RADIUS, [spring]);
+  assert.equal(walkHitSpring?.id, spring.id, 'Walking horizontally onto ground spring must trigger it');
+
+  // 2. Integration in room simulation - walking on ground across spring
+  const ioWalk = createMockIO();
+  const roomWalk = new GameRoom('ROOM_WALK', 'p1', ioWalk);
+  roomWalk.addPlayer('p1', 'Alice');
+  roomWalk.addPlayer('p2', 'Bob');
+  roomWalk.startMatch();
+
+  const pWalk = roomWalk.players.get('p1');
+  pWalk.x = spring.x + 10;
+  pWalk.y = floorY;
+  pWalk.vy = 0;
+  pWalk.isGrounded = true;
+  pWalk.springCooldown = 0;
+
+  roomWalk.updatePlayerMovement(0.016);
+  assert.ok(pWalk.vy < -800, 'Walking across bottom spring must launch player upward');
+  assert.equal(pWalk.isGrounded, false, 'Player launched by walking on spring must become ungrounded');
+  assert.ok(pWalk.y < floorY, 'Player must be lifted above floor surface after spring trigger');
+
+  // 3. Integration in room simulation - falling downward on spring pad
   const io = createMockIO();
   const room = new GameRoom('ROOM1', 'p1', io);
   room.addPlayer('p1', 'Alice');
@@ -747,6 +775,123 @@ test('28. Room creation leaves prior room cleanly', () => {
   // Old room should be removed since p1 was the only player
   assert.equal(manager.rooms.has(code1), false, 'Empty previous room should be cleaned up');
 });
+
+test('29. Secret Golden Flag Surge twist: holder GAINS +3/s while opponents LOSE -3/s', () => {
+  const io = createMockIO();
+  const room = new GameRoom('ROOM1', 'p1', io);
+  room.addPlayer('p1', 'Alice');
+  room.addPlayer('p2', 'Bob');
+  room.startMatch();
+
+  room.setFlagHolder('p1', 'test');
+  const p1 = room.players.get('p1');
+  const p2 = room.players.get('p2');
+  p1.score = 20;
+  p2.score = 20;
+
+  // Normal scoring: 1 second dt -> holder loses 2 pts (-2), non-holder gains 1 pt (+1)
+  room.updateScoring(1.0);
+  assert.equal(Math.round(p1.score), 18);
+  assert.equal(Math.round(p2.score), 21);
+
+  // Activate Golden Flag Surge
+  room.isFlagSurgeActive = true;
+  // 1 second dt during surge -> holder GAINS +3 pts/s (18 + 3 = 21)
+  // Opponent (non-holder) LOSES -3 pts/s (21 - 3 = 18)
+  room.updateScoring(1.0);
+  assert.equal(Math.round(p1.score), 21);
+  assert.equal(Math.round(p2.score), 18);
+
+  // Deactivate surge -> normal scoring resumes (holder -2 pts/s, non-holder +1 pt/s)
+  room.isFlagSurgeActive = false;
+  room.updateScoring(1.0);
+  assert.equal(Math.round(p1.score), 19);
+  assert.equal(Math.round(p2.score), 19);
+});
+
+test('30. Toss only triggers for exactly 2 players and is skipped when > 2 players', () => {
+  const io = createMockIO();
+  const room = new GameRoom('ROOM3', 'p1', io);
+  room.addPlayer('p1', 'Alice');
+  room.addPlayer('p2', 'Bob');
+  room.addPlayer('p3', 'Charlie');
+
+  // With 3 players, direct performToss returns null
+  assert.equal(room.performToss(), null, 'Toss should return null when player count is not 2');
+
+  // Start countdown with 3 players
+  io.emittedEvents = [];
+  const startRes = room.startCountdown('p1');
+  assert.equal(startRes.success, true);
+
+  // FLAG_TOSS should NOT be emitted
+  const tossEvent = io.emittedEvents.find(e => e.event === EVENTS.SERVER.FLAG_TOSS);
+  assert.equal(tossEvent, undefined, 'Flag toss event should not be emitted with > 2 players');
+
+  // Pending initial holder was still selected
+  assert.ok(room.pendingTossWinnerId);
+  assert.ok(['p1', 'p2', 'p3'].includes(room.pendingTossWinnerId));
+
+  // When match begins, selected holder gets flag and 20 lead, others get 0
+  room.startMatch();
+  assert.ok(room.flagHolderId);
+  const holder = room.players.get(room.flagHolderId);
+  assert.equal(holder.score, 20);
+  for (const [id, player] of room.players.entries()) {
+    if (id !== room.flagHolderId) {
+      assert.equal(player.score, 0);
+    }
+  }
+
+  // Now create a 2-player room to verify toss DOES run
+  const io2 = createMockIO();
+  const room2 = new GameRoom('ROOM2', 'p1', io2);
+  room2.addPlayer('p1', 'Alice');
+  room2.addPlayer('p2', 'Bob');
+
+  const startRes2 = room2.startCountdown('p1');
+  assert.equal(startRes2.success, true);
+  const tossEvent2 = io2.emittedEvents.find(e => e.event === EVENTS.SERVER.FLAG_TOSS);
+  assert.ok(tossEvent2, 'Flag toss event should be emitted for exactly 2 players');
+  assert.ok(['p1', 'p2'].includes(tossEvent2.payload.winnerId));
+});
+
+test('31. Matchmaking rejection when player name is empty or missing', () => {
+  const io = createMockIO();
+  const manager = new RoomManager(io);
+
+  // Attempt to create room without a name
+  const emptyCreate1 = manager.createRoom('socket-1', '');
+  assert.equal(emptyCreate1.success, false);
+  assert.match(emptyCreate1.reason, /nickname/i);
+
+  const emptyCreate2 = manager.createRoom('socket-2', '   ');
+  assert.equal(emptyCreate2.success, false);
+  assert.match(emptyCreate2.reason, /nickname/i);
+
+  const nullCreate = manager.createRoom('socket-3', null);
+  assert.equal(nullCreate.success, false);
+  assert.match(nullCreate.reason, /nickname/i);
+
+  // Create valid room
+  const validCreate = manager.createRoom('socket-host', 'HostAlice');
+  assert.equal(validCreate.success, true);
+  const code = validCreate.code;
+
+  // Attempt to join room without a name
+  const emptyJoin1 = manager.joinRoom('socket-guest1', code, '');
+  assert.equal(emptyJoin1.success, false);
+  assert.match(emptyJoin1.reason, /nickname/i);
+
+  const emptyJoin2 = manager.joinRoom('socket-guest2', code, '   ');
+  assert.equal(emptyJoin2.success, false);
+  assert.match(emptyJoin2.reason, /nickname/i);
+
+  // Valid join
+  const validJoin = manager.joinRoom('socket-guest3', code, 'GuestBob');
+  assert.equal(validJoin.success, true);
+});
+
 
 
 

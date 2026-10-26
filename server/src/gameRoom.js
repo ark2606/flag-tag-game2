@@ -53,6 +53,10 @@ export class GameRoom {
     this.phaseSchedule = [];
     this.activePhase = null;
 
+    // Twist: Secret Golden Flag Surge state (holding flag gains points)
+    this.surgeSchedule = [];
+    this.isFlagSurgeActive = false;
+
     // Simulation loop handles
     this.loopInterval = null;
     this.lastTickTime = null;
@@ -72,9 +76,8 @@ export class GameRoom {
    * Sanitizes usernames to avoid HTML injection and length overflow.
    */
   sanitizeUsername(name) {
-    if (!name || typeof name !== 'string') return 'Player';
-    const clean = name.trim().replace(/[^a-zA-Z0-9 _-]/g, '').slice(0, 16);
-    return clean.length > 0 ? clean : 'Player';
+    if (!name || typeof name !== 'string') return '';
+    return name.trim().replace(/[^a-zA-Z0-9 _-]/g, '').slice(0, 16);
   }
 
   /**
@@ -89,7 +92,15 @@ export class GameRoom {
       return { success: false, reason: 'Match is currently in progress.' };
     }
 
+    if (!rawName || typeof rawName !== 'string' || !rawName.trim()) {
+      return { success: false, reason: 'A valid nickname is required.' };
+    }
+
     const username = this.sanitizeUsername(rawName);
+    if (!username) {
+      return { success: false, reason: 'A valid nickname is required.' };
+    }
+
     const color = PLAYER_CONFIG.COLORS[this.colorIndex % PLAYER_CONFIG.COLORS.length];
     this.colorIndex++;
 
@@ -108,7 +119,7 @@ export class GameRoom {
       dropDown: false,
       isGrounded: true,
       springCooldown: 0,
-      score: 0,
+      score: this.scoringConfig.STARTING_SCORE ?? 20,
       speedBoostTimer: 0,
       isConnected: true,
     };
@@ -220,8 +231,16 @@ export class GameRoom {
     this.status = ROOM_STATUS.COUNTDOWN;
     this.countdownRemaining = this.matchConfig.COUNTDOWN_DURATION;
 
-    // Perform flag toss to decide initial holder
-    this.performToss();
+    // Perform flag toss to decide initial holder ONLY when exactly 2 players.
+    // When there are more than 2 players, toss is skipped and initial holder is chosen directly.
+    if (this.players.size === 2) {
+      this.performToss();
+    } else {
+      const playerIds = Array.from(this.players.keys());
+      if (playerIds.length > 0) {
+        this.pendingTossWinnerId = playerIds[Math.floor(Math.random() * playerIds.length)];
+      }
+    }
 
     // Reset spawn positions
     let idx = 0;
@@ -236,7 +255,7 @@ export class GameRoom {
       player.dropDown = false;
       player.isGrounded = true;
       player.springCooldown = 0;
-      player.score = 0;
+      player.score = this.scoringConfig.STARTING_SCORE ?? 0;
       player.speedBoostTimer = 0;
       idx++;
     }
@@ -270,6 +289,12 @@ export class GameRoom {
     this.finalPenaltyApplied = false;
     this.phaseSchedule = [];
     this.activePhase = null;
+    this.surgeSchedule = [];
+    this.isFlagSurgeActive = false;
+
+    for (const player of this.players.values()) {
+      player.score = this.scoringConfig.STARTING_SCORE ?? 0;
+    }
 
     for (const stats of this.stats.values()) {
       stats.passesMade = 0;
@@ -279,8 +304,11 @@ export class GameRoom {
 
   /**
    * Performs an authoritative flag toss to select the initial flag holder.
+   * Only active in 2-player matches (skipped if > 2 players).
    */
   performToss() {
+    if (this.players.size !== 2) return null;
+
     const playerIds = Array.from(this.players.keys());
     if (playerIds.length === 0) return null;
 
@@ -352,12 +380,59 @@ export class GameRoom {
   }
 
   /**
+   * Schedules randomized surprise Golden Flag Gain surges.
+   * Crucial rule twist: Holding the flag GAINS points (+3 pts/s).
+   * Secret duration is determined authoritatively by server and NEVER revealed to players!
+   * Duration can be 4-14 seconds, or even last until match end.
+   */
+  scheduleSurges() {
+    const duration = this.matchConfig.ROUND_DURATION;
+    this.surgeSchedule = [];
+    this.isFlagSurgeActive = false;
+
+    const count = Math.max(1, Math.min(3, Math.floor(duration / 40)));
+    const margin = 8;
+    const usableTime = Math.max(10, duration - margin * 2);
+    const step = usableTime / count;
+
+    for (let i = 0; i < count; i++) {
+      const segStart = duration - margin - i * step;
+      const startTime = Math.round(segStart - Math.random() * (step * 0.6));
+
+      // Random duration: 4s to 12s, or until the end if close to zero!
+      let surgeDuration;
+      const canLastUntilEnd = startTime <= 16 && Math.random() < 0.35;
+      if (canLastUntilEnd) {
+        surgeDuration = startTime; // Lasts right until the final whistle
+      } else {
+        surgeDuration = Math.min(startTime - 2, Math.floor(Math.random() * 9) + 4);
+      }
+
+      if (startTime > 3 && surgeDuration >= 3) {
+        this.surgeSchedule.push({
+          startTime,
+          duration: surgeDuration,
+          started: false,
+          ended: false,
+        });
+      }
+    }
+
+    this.surgeSchedule.sort((a, b) => b.startTime - a.startTime);
+  }
+
+  /**
    * Begins the official match.
    */
   startMatch() {
     this.status = ROOM_STATUS.PLAYING;
     this.timeRemaining = this.matchConfig.ROUND_DURATION;
     this.lastTickTime = Date.now();
+
+    // Reset all players to base starting score (0)
+    for (const player of this.players.values()) {
+      player.score = this.scoringConfig.STARTING_SCORE ?? 0;
+    }
 
     // Use toss winner if determined during countdown, or fallback to random
     const initialHolderId = (this.pendingTossWinnerId && this.players.has(this.pendingTossWinnerId))
@@ -369,18 +444,19 @@ export class GameRoom {
     if (initialHolderId) {
       this.setFlagHolder(initialHolderId, 'round_start');
       const initialHolder = this.players.get(initialHolderId);
-      if (initialHolder) {
+      if (initialHolder && this.scoringConfig.STARTING_BONUS) {
         initialHolder.score += this.scoringConfig.STARTING_BONUS;
       }
     }
 
-    // Authoritatively schedule dynamic scoring phases
+    // Authoritatively schedule dynamic scoring phases and secret surges
     this.scheduleScoringPhases();
+    this.scheduleSurges();
 
     const initialHolder = this.players.get(this.flagHolderId);
     this.emitToRoom(EVENTS.SERVER.GAME_STARTED, {
       flagHolderId: this.flagHolderId,
-      startingBonus: this.scoringConfig.STARTING_BONUS,
+      startingBonus: this.scoringConfig.STARTING_BONUS || 0,
       tossWinnerName: initialHolder?.name || 'Player',
       effectiveSpeed: this.effectiveSpeed,
     });
@@ -433,8 +509,9 @@ export class GameRoom {
       return;
     }
 
-    // 2. Check and Update Dynamic Scoring Phases
+    // 2. Check and Update Dynamic Scoring Phases & Secret Gaining Surges
     this.updateScoringPhases();
+    this.updateSurges();
 
     // 3. Update Continuous Scoring
     this.updateScoring(dt);
@@ -491,20 +568,57 @@ export class GameRoom {
   }
 
   /**
+   * Authoritative secret surge ticker:
+   * Activates Golden Flag Gain periods of unknown duration!
+   * Holding the flag GAINS points instead of losing them.
+   */
+  updateSurges() {
+    for (const surge of this.surgeSchedule) {
+      // Trigger surge start (secret duration - no time sent to players!)
+      if (this.timeRemaining <= surge.startTime && !surge.started) {
+        surge.started = true;
+        this.isFlagSurgeActive = true;
+        this.emitToRoom(EVENTS.SERVER.FLAG_SURGE_STARTED, {
+          isGaining: true,
+          pointsPerSec: this.scoringConfig.SURGE_HOLDER_POINTS_PER_SEC || 3,
+        });
+      }
+
+      // Trigger surge end
+      if (this.timeRemaining <= (surge.startTime - surge.duration) && surge.started && !surge.ended) {
+        surge.ended = true;
+        this.isFlagSurgeActive = false;
+        this.emitToRoom(EVENTS.SERVER.FLAG_SURGE_ENDED, {
+          isGaining: false,
+        });
+      }
+    }
+  }
+
+  /**
    * Central Scoring update tick.
-   * - Flag holder: -2 pts/sec (multiplied during Flag Frenzy)
-   * - Non-holders: +1 pt/sec (multiplied during Double Survival)
-   * (Fixed 5-sec hold bonus removed in favor of dynamic scoring phases)
+   * - Normal: Flag holder loses points (-2 pts/sec), non-holders gain points (+1 pt/sec)
+   * - Golden Surge: Flag holder GAINS points (+3 pts/sec), non-holders LOSE points (-1 pt/sec)!
    */
   updateScoring(dt) {
-    let holderRate = this.scoringConfig.HOLDER_POINTS_PER_SEC;
-    let nonHolderRate = this.scoringConfig.NON_HOLDER_POINTS_PER_SEC;
+    let holderRate;
+    let nonHolderRate;
 
-    if (this.activePhase?.holderMultiplier) {
-      holderRate *= this.activePhase.holderMultiplier;
-    }
-    if (this.activePhase?.nonHolderMultiplier) {
-      nonHolderRate *= this.activePhase.nonHolderMultiplier;
+    if (this.isFlagSurgeActive) {
+      // Golden surge twist: holding flag GAINS points (+3 pts/s), opponents LOSE points (-3 pts/sec)!
+      holderRate = this.scoringConfig.SURGE_HOLDER_POINTS_PER_SEC ?? 3;
+      nonHolderRate = this.scoringConfig.SURGE_NON_HOLDER_POINTS_PER_SEC ?? -3;
+    } else {
+      // Normal: holding flag loses points, non-holders gain points
+      holderRate = this.scoringConfig.HOLDER_POINTS_PER_SEC ?? -2;
+      nonHolderRate = this.scoringConfig.NON_HOLDER_POINTS_PER_SEC ?? 1;
+
+      if (this.activePhase?.holderMultiplier) {
+        holderRate *= this.activePhase.holderMultiplier;
+      }
+      if (this.activePhase?.nonHolderMultiplier) {
+        nonHolderRate *= this.activePhase.nonHolderMultiplier;
+      }
     }
 
     for (const [id, player] of this.players.entries()) {
@@ -562,6 +676,7 @@ export class GameRoom {
         springTriggered = checkSpringPadCollision(prevY, newY, newX, PLAYER_CONFIG.RADIUS, SPRINGS);
         if (springTriggered) {
           player.vy = springTriggered.impulse;
+          newY = springTriggered.y - PLAYER_CONFIG.RADIUS - 4;
           player.isGrounded = false;
           player.springCooldown = PHYSICS_CONFIG.COOLDOWN_AFTER_BOUNCE;
           this.emitToRoom(EVENTS.SERVER.SPRING_TRIGGERED, {
@@ -598,31 +713,29 @@ export class GameRoom {
       }
 
       const floorY = ARENA.GROUND_Y - PLAYER_CONFIG.RADIUS;
-      if (newY >= floorY) {
+      if (!springTriggered && newY >= floorY) {
         newY = floorY;
         player.vy = 0;
         groundedThisFrame = true;
       }
 
-      player.x = newX;
-      player.y = newY;
-      player.isGrounded = groundedThisFrame;
-
       // Check if player is standing on a spring pad (for walking detection)
-      // This catches the case when walking horizontally onto a spring
+      // This catches the case when walking horizontally onto a spring on the ground or platforms
       if (groundedThisFrame && player.springCooldown <= 0 && !springTriggered) {
         for (const spring of SPRINGS) {
-          const springLeft = spring.x - PLAYER_CONFIG.RADIUS * 0.3;
-          const springRight = spring.x + spring.width + PLAYER_CONFIG.RADIUS * 0.3;
+          const springLeft = spring.x - PLAYER_CONFIG.RADIUS * 0.5;
+          const springRight = spring.x + spring.width + PLAYER_CONFIG.RADIUS * 0.5;
           const springTop = spring.y;
+          const springBottom = spring.y + spring.height;
           const playerFeet = newY + PLAYER_CONFIG.RADIUS;
 
           // Only trigger if player's horizontal center is over the spring
-          // AND feet are within 3px of the spring top (very precise)
+          // and feet are within the spring's vertical landing bounds
           if (newX >= springLeft && newX <= springRight &&
-              Math.abs(playerFeet - springTop) <= 3) {
+              playerFeet >= springTop - 6 && playerFeet <= springBottom + 12) {
             player.vy = spring.impulse;
-            player.isGrounded = false;
+            newY = spring.y - PLAYER_CONFIG.RADIUS - 4;
+            groundedThisFrame = false;
             player.springCooldown = PHYSICS_CONFIG.COOLDOWN_AFTER_BOUNCE;
             this.emitToRoom(EVENTS.SERVER.SPRING_TRIGGERED, {
               springId: spring.id,
@@ -633,6 +746,10 @@ export class GameRoom {
           }
         }
       }
+
+      player.x = newX;
+      player.y = newY;
+      player.isGrounded = groundedThisFrame;
     }
 
     // Players pass through each other like ghosts - no collision blocking
@@ -736,16 +853,10 @@ export class GameRoom {
     this.stopSimulation();
     this.activePhase = null;
     this.phaseSchedule = [];
+    this.isFlagSurgeActive = false;
+    this.surgeSchedule = [];
 
-    // Apply end-of-round penalty to the final flag holder exactly once (-40 points)
-    // Only applied if match completed normally, not when aborted due to players leaving
-    if (!this.finalPenaltyApplied && this.flagHolderId && reason !== 'all_players_left') {
-      const finalHolder = this.players.get(this.flagHolderId);
-      if (finalHolder) {
-        finalHolder.score += this.scoringConfig.FINAL_HOLDER_PENALTY;
-      }
-      this.finalPenaltyApplied = true;
-    }
+    // End penalty is completely removed per user rules (0 penalty)
 
     // Compute rankings
     const rankings = Array.from(this.players.values())
@@ -769,7 +880,7 @@ export class GameRoom {
       rankings,
       winner,
       finalHolderId: this.flagHolderId,
-      finalPenalty: this.scoringConfig.FINAL_HOLDER_PENALTY,
+      finalPenalty: 0,
       reason,
       message: reason === 'all_players_left' ? 'Everyone has left the room!' : null,
     });
@@ -860,6 +971,7 @@ export class GameRoom {
     const snapshot = {
       t: Math.round(this.timeRemaining * 10) / 10,
       f: this.flagHolderId,
+      sg: this.isFlagSurgeActive ? 1 : 0,
       p: Array.from(this.players.values()).map(p => ({
         id: p.id,
         name: p.name,

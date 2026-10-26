@@ -31,6 +31,10 @@ export class RoomManager {
    * Creates a new game room.
    */
   createRoom(hostSocketId, hostName, customConfig = {}) {
+    if (!hostName || typeof hostName !== 'string' || !hostName.trim()) {
+      return { success: false, reason: 'A nickname is required to create a room.' };
+    }
+
     // If player already in a room, leave first
     this.leaveCurrentRoom(hostSocketId);
 
@@ -57,6 +61,10 @@ export class RoomManager {
    * Joins an existing room by code.
    */
   joinRoom(socketId, rawCode, playerName) {
+    if (!playerName || typeof playerName !== 'string' || !playerName.trim()) {
+      return { success: false, reason: 'A nickname is required to join a room.' };
+    }
+
     this.leaveCurrentRoom(socketId);
 
     if (!rawCode || typeof rawCode !== 'string') {

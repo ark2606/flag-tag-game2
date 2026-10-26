@@ -32,7 +32,7 @@
       </div>
 
       <div id="hud-flag-card" class="hud-top-card flag-card">
-        <span class="hud-flag-icon">FLAG</span>
+        <span class="hud-flag-icon">🚩</span>
         <span id="hud-flag-text">Holder: <strong>None</strong></span>
       </div>
     </div>
@@ -74,6 +74,7 @@
         </div>
         <button id="sound-toggle-btn" class="icon-btn" title="Toggle Mute">SND</button>
         <button id="fullscreen-btn" class="icon-btn" title="Toggle Landscape Fullscreen">FS</button>
+        <button id="in-game-exit-btn" class="icon-btn exit-icon-btn hidden" title="Exit / Leave Room">EXIT</button>
       </div>
     </div>
   </header>
@@ -123,17 +124,16 @@
       <div class="menu-info-grid">
         <div class="info-box">
           <h4>Controls</h4>
-          <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> or <kbd>&uarr;</kbd><kbd>&larr;</kbd><kbd>&darr;</kbd><kbd>&rarr;</kbd></p>
-          <small>Touch / Virtual Joystick on mobile</small>
+          <p><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd>, <kbd>&uarr;</kbd><kbd>&larr;</kbd><kbd>&darr;</kbd><kbd>&rarr;</kbd>, or <strong>Mouse Click & Drag</strong></p>
+          <small>Instant zero-lag reaction (Among Us style) • Touch / Virtual Joystick on mobile</small>
         </div>
         <div class="info-box">
           <h4>Scoring Rules</h4>
           <ul>
-            <li>Starting Holder: <strong>+30 pts</strong></li>
-            <li>Non-holders: <strong>+1 pt/s</strong> | Holder: <strong>-2 pts/s</strong></li>
-            <li>5s Hold Bonus: <strong>+8 pts</strong></li>
+            <li>Starting Flag Holder: <strong>Starts with 20 points lead!</strong> (Others: 0 pts)</li>
+            <li>Flag Holder: <strong>-2 pts/s</strong> | Non-holders: <strong>+1 pt/s</strong></li>
+            <li>Golden Flag Twist: <strong>Surprise surges! Holder GAINS +3 pts/s, opponents LOSE -3 pts/s! (Secret duration)</strong></li>
             <li>Successful Pass: <strong>+5 pts</strong></li>
-            <li>Holding at 0s: <strong>-40 pts</strong></li>
           </ul>
         </div>
       </div>
@@ -241,8 +241,8 @@
 
         <div class="coin-container">
           <div class="coin" id="toss-coin">
-            <div class="coin-face coin-front">FLAG</div>
-            <div class="coin-face coin-back">TAG</div>
+            <div class="coin-face coin-front" title="FLAG">🚩</div>
+            <div class="coin-face coin-back" title="TAG">TAG</div>
           </div>
         </div>
 
@@ -254,7 +254,7 @@
         <div class="toss-winner-banner hidden" id="toss-winner-banner">
           <span class="winner-tag">FIRST FLAG HOLDER</span>
           <div class="winner-display" id="toss-winner-name">Player</div>
-          <div class="winner-perk">+30 Points Starting Bonus!</div>
+          <div class="winner-perk">+20 Points Starting Lead!</div>
         </div>
       </div>
     </div>
@@ -419,6 +419,23 @@
           Open Standalone Page &rarr;
         </a>
         <button type="button" id="close-legal-done-btn" class="btn btn-secondary btn-sm">Close</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- EXIT CONFIRMATION MODAL -->
+  <div id="exit-modal-overlay" class="screen-overlay hidden">
+    <div class="exit-modal-card glass-panel">
+      <div class="exit-modal-header">
+        <span class="badge badge-warning">CONFIRM EXIT</span>
+      </div>
+      <h3 class="exit-modal-title">Leave the Game?</h3>
+      <p class="exit-modal-desc">
+        Are you sure you want to exit? You will leave your current room and active match.
+      </p>
+      <div class="exit-modal-actions">
+        <button type="button" id="exit-cancel-btn" class="btn btn-primary">Stay in Game</button>
+        <button type="button" id="exit-confirm-btn" class="btn btn-danger">Leave Room</button>
       </div>
     </div>
   </div>

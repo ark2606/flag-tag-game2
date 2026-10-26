@@ -99,6 +99,14 @@ export class UIManager {
     this.privacyLink = document.getElementById('privacy-link');
     this.termsLink = document.getElementById('terms-link');
 
+    // Exit Confirmation Modal elements
+    this.exitModalOverlay = document.getElementById('exit-modal-overlay');
+    this.exitCancelBtn = document.getElementById('exit-cancel-btn');
+    this.exitConfirmBtn = document.getElementById('exit-confirm-btn');
+    this.inGameExitBtn = document.getElementById('in-game-exit-btn');
+    this.onExitConfirmCallback = null;
+    this.onExitRequest = null;
+
     this.currentSpeed = 440;
     this.currentMult = 1.0;
     this.selectedTimer = 120;
@@ -323,11 +331,65 @@ export class UIManager {
       });
     }
 
+    // Exit confirmation modal buttons
+    if (this.exitCancelBtn) {
+      this.exitCancelBtn.addEventListener('click', () => {
+        this.hideExitConfirmModal();
+      });
+    }
+
+    if (this.exitConfirmBtn) {
+      this.exitConfirmBtn.addEventListener('click', () => {
+        const cb = this.onExitConfirmCallback;
+        this.hideExitConfirmModal();
+        if (typeof cb === 'function') cb();
+      });
+    }
+
+    if (this.exitModalOverlay) {
+      this.exitModalOverlay.addEventListener('click', (e) => {
+        if (e.target === this.exitModalOverlay) {
+          this.hideExitConfirmModal();
+        }
+      });
+    }
+
+    if (this.inGameExitBtn) {
+      this.inGameExitBtn.addEventListener('click', () => {
+        if (typeof this.onExitRequest === 'function') {
+          this.onExitRequest();
+        }
+      });
+    }
+
     window.addEventListener('keydown', (e) => {
-      if (e.key === 'Escape' && this.legalModalOverlay && !this.legalModalOverlay.classList.contains('hidden')) {
-        this.hideLegalModal();
+      if (e.key === 'Escape') {
+        if (this.exitModalOverlay && !this.exitModalOverlay.classList.contains('hidden')) {
+          this.hideExitConfirmModal();
+          return;
+        }
+        if (this.legalModalOverlay && !this.legalModalOverlay.classList.contains('hidden')) {
+          this.hideLegalModal();
+          return;
+        }
       }
     });
+  }
+
+  showExitConfirmModal(onConfirm) {
+    this.onExitConfirmCallback = onConfirm;
+    if (this.exitModalOverlay) {
+      this.exitModalOverlay.classList.remove('hidden');
+      this.exitModalOverlay.classList.add('active');
+    }
+  }
+
+  hideExitConfirmModal() {
+    if (this.exitModalOverlay) {
+      this.exitModalOverlay.classList.add('hidden');
+      this.exitModalOverlay.classList.remove('active');
+    }
+    this.onExitConfirmCallback = null;
   }
 
   showLegalModal(tab = 'privacy') {
@@ -527,30 +589,47 @@ export class UIManager {
   }
 
   getPlayerName() {
-    const name = this.playerNameInput.value.trim() || 'Player';
+    const raw = this.playerNameInput ? this.playerNameInput.value : '';
+    const name = raw ? raw.trim() : '';
+    if (!name) {
+      this.showToast('Please enter your nickname before playing!', 'error');
+      if (this.playerNameInput) {
+        this.playerNameInput.focus();
+        this.playerNameInput.classList.add('input-error');
+        setTimeout(() => {
+          this.playerNameInput?.classList.remove('input-error');
+        }, 1500);
+      }
+      return null;
+    }
     localStorage.setItem('flagtag_name', name);
     return name;
   }
 
   showScreen(screenName) {
+    this.currentScreen = screenName;
     [this.mainMenu, this.lobbyScreen, this.resultsScreen].forEach((el) => {
       if (el) el.classList.remove('active');
     });
     this.hideGameOverAlone();
 
-    if (screenName === 'menu' && this.mainMenu) {
-      this.mainMenu.classList.add('active');
-      this.inGameHud.classList.add('hidden');
+    if (screenName === 'menu') {
+      if (this.mainMenu) this.mainMenu.classList.add('active');
+      if (this.inGameHud) this.inGameHud.classList.add('hidden');
+      if (this.inGameExitBtn) this.inGameExitBtn.classList.add('hidden');
       this.setCreateRoomLoading(false);
       this.setJoinRoomLoading(false);
-    } else if (screenName === 'lobby' && this.lobbyScreen) {
-      this.lobbyScreen.classList.add('active');
-      this.inGameHud.classList.add('hidden');
-    } else if (screenName === 'game' && this.inGameHud) {
-      this.inGameHud.classList.remove('hidden');
-    } else if (screenName === 'results' && this.resultsScreen) {
-      this.resultsScreen.classList.add('active');
-      this.inGameHud.classList.add('hidden');
+    } else if (screenName === 'lobby') {
+      if (this.lobbyScreen) this.lobbyScreen.classList.add('active');
+      if (this.inGameHud) this.inGameHud.classList.add('hidden');
+      if (this.inGameExitBtn) this.inGameExitBtn.classList.remove('hidden');
+    } else if (screenName === 'game') {
+      if (this.inGameHud) this.inGameHud.classList.remove('hidden');
+      if (this.inGameExitBtn) this.inGameExitBtn.classList.remove('hidden');
+    } else if (screenName === 'results') {
+      if (this.resultsScreen) this.resultsScreen.classList.add('active');
+      if (this.inGameHud) this.inGameHud.classList.add('hidden');
+      if (this.inGameExitBtn) this.inGameExitBtn.classList.remove('hidden');
     }
   }
 
@@ -662,7 +741,7 @@ export class UIManager {
     const candidates = tossData.candidates || [];
     const winnerName = tossData.winnerName || 'Player';
     const winnerColor = tossData.winnerColor || '#f59e0b';
-    const startingBonus = tossData.startingBonus || 30;
+    const startingBonus = tossData.startingBonus || 20;
 
     // Show toss overlay
     this.tossOverlay.classList.remove('hidden');
@@ -705,7 +784,7 @@ export class UIManager {
           this.tossWinnerBanner.classList.remove('hidden');
         }
         if (this.tossWinnerName) {
-          this.tossWinnerName.innerHTML = `<span style="color:${winnerColor}">[FLAG]</span> ${winnerName}`;
+          this.tossWinnerName.innerHTML = `<span class="toss-flag-icon">🚩</span> ${winnerName}`;
         }
 
         soundSynth.playTossWin();
@@ -746,9 +825,13 @@ export class UIManager {
     }
   }
 
-  updateHudFlagHolder(holderName, colorHex = '#f59e0b') {
+  updateHudFlagHolder(holderName, colorHex = '#f59e0b', isSurge = false) {
     if (holderName) {
-      this.hudFlagText.innerHTML = `Flag Holder: <strong style="color: ${colorHex}">${holderName}</strong>`;
+      if (isSurge) {
+        this.hudFlagText.innerHTML = `Flag Holder: <strong style="color: #fbbf24">${holderName}</strong> <span class="surge-tag">(+3/s GAINING!)</span>`;
+      } else {
+        this.hudFlagText.innerHTML = `Flag Holder: <strong style="color: ${colorHex}">${holderName}</strong> <span class="drain-tag">(-2/s)</span>`;
+      }
     } else {
       this.hudFlagText.innerHTML = `Flag Holder: <strong>None</strong>`;
     }
@@ -810,7 +893,13 @@ export class UIManager {
       // Player name
       const name = document.createElement('span');
       name.className = 'score-name';
-      name.textContent = (isHolder ? '[FLAG] ' : '') + (p.name || 'Player');
+      if (isHolder) {
+        const flagIcon = document.createElement('span');
+        flagIcon.className = 'score-flag-icon';
+        flagIcon.textContent = '🚩 ';
+        name.appendChild(flagIcon);
+      }
+      name.appendChild(document.createTextNode(p.name || 'Player'));
 
       // Points
       const score = document.createElement('span');
@@ -852,7 +941,7 @@ export class UIManager {
       rankTd.textContent = idx === 0 ? '1st' : idx === 1 ? '2nd' : idx === 2 ? '3rd' : `${idx + 1}th`;
 
       const playerTd = document.createElement('td');
-      playerTd.innerHTML = `<span style="color:${r.color?.css || '#06b6d4'}">●</span> ${r.name} ${r.wasFinalHolder ? '<small style="color:#ef4444">(Penalty -40)</small>' : ''}`;
+      playerTd.innerHTML = `<span style="color:${r.color?.css || '#06b6d4'}">●</span> ${r.name}`;
 
       const passesTd = document.createElement('td');
       passesTd.textContent = r.passesMade;
@@ -975,6 +1064,34 @@ export class UIManager {
   hidePhaseActive() {
     if (!this.phaseBanner) return;
     this.phaseBanner.classList.add('hidden');
-    this.phaseBanner.classList.remove('warning', 'active');
+    this.phaseBanner.classList.remove('warning', 'active', 'surge-active');
+  }
+
+  /**
+   * Show Golden Flag Surge banner when surprise gaining phase begins.
+   */
+  showSurgeActive() {
+    this.showToast('✨ GOLDEN SURGE! Holder gains +3/s, opponents LOSE -3/s! Duration secret!', 'surge');
+    if (this.phaseBanner) {
+      this.phaseBanner.classList.remove('hidden', 'warning', 'active');
+      this.phaseBanner.classList.add('surge-active');
+      if (this.phaseTitle) {
+        this.phaseTitle.textContent = '✨ GOLDEN FLAG SURGE! ✨';
+      }
+      if (this.phaseDescription) {
+        this.phaseDescription.textContent = 'Flag holder GAINS +3/s! Opponents LOSE -3/s! Snatch the flag!';
+      }
+    }
+  }
+
+  /**
+   * Show notification when Golden Flag Surge ends.
+   */
+  showSurgeEnded() {
+    this.showToast('⚡ Golden Surge ended! Normal scoring resumed (Holder -2/s, others +1/s).', 'warning');
+    if (this.phaseBanner && this.phaseBanner.classList.contains('surge-active')) {
+      this.phaseBanner.classList.add('hidden');
+      this.phaseBanner.classList.remove('surge-active');
+    }
   }
 }
