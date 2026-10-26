@@ -119,8 +119,15 @@ class GameApp {
       this.myId = data.socketId;
       const scene = this.phaserGame.scene.getScene('ArenaScene');
       if (scene) scene.myId = this.myId;
+      this.ui.updateConnectionStatus('connected');
       this.ui.setCreateRoomLoading(false);
       this.ui.setJoinRoomLoading(false);
+    });
+
+    this.network.on('server_awake', () => {
+      if (!this.network.isConnected) {
+        this.ui.updateConnectionStatus('connecting');
+      }
     });
 
     this.network.on('ping_update', (pingMs) => {
@@ -231,14 +238,20 @@ class GameApp {
     });
 
     this.network.on('disconnect', () => {
+      this.ui.updateConnectionStatus('disconnected');
       this.ui.showToast('Disconnected from server. Reconnecting...', 'error');
       this.ui.setCreateRoomLoading(false);
       this.ui.setJoinRoomLoading(false);
     });
 
     this.network.on('connect_error', () => {
+      this.ui.updateConnectionStatus('waking');
       this.ui.setCreateRoomLoading(false);
       this.ui.setJoinRoomLoading(false);
+    });
+
+    this.network.on('reconnect_attempt', () => {
+      this.ui.updateConnectionStatus('connecting');
     });
   }
 
@@ -263,7 +276,10 @@ class GameApp {
           player: { BASE_SPEED: Number.isFinite(this.ui.currentMult) ? Math.round(440 * this.ui.currentMult) : 440 },
         };
 
-        const res = await this.network.createRoom(name, customConfig);
+        const res = await this.network.createRoom(name, customConfig, (statusText) => {
+          this.ui.setCreateRoomLoading(true, statusText);
+          this.ui.showToast(statusText, 'warning');
+        });
         if (!res || !res.success) {
           this.ui.showToast(`${res?.reason || 'Could not create room'}`, 'error');
         }
@@ -287,7 +303,10 @@ class GameApp {
 
       this.ui.setJoinRoomLoading(true);
       try {
-        const res = await this.network.joinRoom(code, name);
+        const res = await this.network.joinRoom(code, name, (statusText) => {
+          this.ui.setJoinRoomLoading(true, statusText);
+          this.ui.showToast(statusText, 'warning');
+        });
         if (!res || !res.success) {
           this.ui.showToast(`${res?.reason || 'Could not join room'}`, 'error');
         }

@@ -26,6 +26,30 @@ export class SocketClient {
     }
 
     this.serverUrl = envUrl || defaultUrl;
+    this.keepAliveInterval = null;
+    this.startKeepAliveLoop();
+  }
+
+  wakeUpServer() {
+    if (!this.serverUrl) return;
+    const healthUrl = `${this.serverUrl}/health`;
+    fetch(healthUrl, { method: 'GET', cache: 'no-store' })
+      .then((res) => {
+        if (res.ok) {
+          this.trigger('server_awake');
+        }
+      })
+      .catch(() => {
+        // Will be connected/retried via socket
+      });
+  }
+
+  startKeepAliveLoop() {
+    if (this.keepAliveInterval) clearInterval(this.keepAliveInterval);
+    // Ping health check every 9 minutes to keep cloud server awake while game tab is open
+    this.keepAliveInterval = setInterval(() => {
+      this.wakeUpServer();
+    }, 9 * 60 * 1000);
   }
 
   get isConnected() {
@@ -33,15 +57,23 @@ export class SocketClient {
   }
 
   connect() {
-    if (this.socket) return;
+    if (this.socket) {
+      if (this.socket.disconnected) {
+        this.socket.connect();
+      }
+      return;
+    }
+
+    // Immediately trigger server wake-up via HTTP health check
+    this.wakeUpServer();
 
     this.socket = io(this.serverUrl, {
-      transports: ['websocket', 'polling'],
+      transports: ['polling', 'websocket'],
       reconnection: true,
       reconnectionAttempts: Infinity,
       reconnectionDelay: 1000,
       reconnectionDelayMax: 5000,
-      timeout: 10000,
+      timeout: 30000,
     });
 
     this.socket.on('connect', () => {
@@ -56,6 +88,10 @@ export class SocketClient {
 
     this.socket.on('connect_error', (error) => {
       this.trigger('connect_error', error);
+    });
+
+    this.socket.io.on('reconnect_attempt', (attempt) => {
+      this.trigger('reconnect_attempt', attempt);
     });
 
     // Wire standard game events
@@ -111,31 +147,46 @@ export class SocketClient {
 
   /**
    * Ensures the socket is connected before emitting actions.
-   * If the socket is connecting, waits up to timeoutMs for the connection to establish.
+   * If the socket is connecting or server is sleeping (cold start on Render),
+   * waits up to timeoutMs (default 45s) while giving the player honest feedback.
    */
-  async ensureConnected(timeoutMs = 6000) {
+  async ensureConnected(timeoutMs = 45000, onStatusUpdate = null) {
     if (this.socket?.connected) return true;
 
     if (!this.socket) {
       this.connect();
+    } else if (this.socket.disconnected) {
+      this.socket.connect();
     }
 
-    if (this.socket.connected) return true;
+    // Ping health endpoint to ensure cloud host wakes up
+    this.wakeUpServer();
+
+    if (this.socket?.connected) return true;
 
     return new Promise((resolve) => {
       let timer = null;
+      let wakeNoticeTimer = null;
+
+      const cleanup = () => {
+        if (timer) clearTimeout(timer);
+        if (wakeNoticeTimer) clearTimeout(wakeNoticeTimer);
+        if (this.socket) {
+          this.socket.off('connect', onConnect);
+        }
+      };
 
       const onConnect = () => {
         cleanup();
         resolve(true);
       };
 
-      const cleanup = () => {
-        if (timer) clearTimeout(timer);
-        if (this.socket) {
-          this.socket.off('connect', onConnect);
+      // If connection takes > 3.5s, server is likely waking from sleep mode
+      wakeNoticeTimer = setTimeout(() => {
+        if (!this.socket?.connected && typeof onStatusUpdate === 'function') {
+          onStatusUpdate('Waking up server (takes ~30s on free hosting)...');
         }
-      };
+      }, 3500);
 
       timer = setTimeout(() => {
         cleanup();
@@ -148,12 +199,12 @@ export class SocketClient {
 
   // --- Client Actions ---
 
-  async createRoom(name, config = {}) {
-    const connected = await this.ensureConnected(6000);
+  async createRoom(name, config = {}, onStatusUpdate = null) {
+    const connected = await this.ensureConnected(45000, onStatusUpdate);
     if (!connected) {
       return {
         success: false,
-        reason: 'Unable to connect to game server. Please check your internet connection and try again.',
+        reason: 'Game server took too long to wake up. Please wait a few seconds and try again.',
       };
     }
 
@@ -164,7 +215,7 @@ export class SocketClient {
           resolved = true;
           resolve({ success: false, reason: 'Server took too long to create room. Please try again.' });
         }
-      }, 8000);
+      }, 10000);
 
       this.socket.emit(EVENTS.CLIENT.CREATE_ROOM, { name, config }, (res) => {
         if (!resolved) {
@@ -176,12 +227,12 @@ export class SocketClient {
     });
   }
 
-  async joinRoom(code, name) {
-    const connected = await this.ensureConnected(6000);
+  async joinRoom(code, name, onStatusUpdate = null) {
+    const connected = await this.ensureConnected(45000, onStatusUpdate);
     if (!connected) {
       return {
         success: false,
-        reason: 'Unable to connect to game server. Please check your internet connection and try again.',
+        reason: 'Game server took too long to wake up. Please wait a few seconds and try again.',
       };
     }
 
@@ -192,7 +243,7 @@ export class SocketClient {
           resolved = true;
           resolve({ success: false, reason: 'Server took too long to join room. Please try again.' });
         }
-      }, 8000);
+      }, 10000);
 
       this.socket.emit(EVENTS.CLIENT.JOIN_ROOM, { code, name }, (res) => {
         if (!resolved) {

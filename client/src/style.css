@@ -1193,8 +1193,39 @@ input[type="text"]:focus {
   width: 8px;
   height: 8px;
   border-radius: 50%;
+  background: #f59e0b;
+  box-shadow: 0 0 8px #f59e0b;
+  transition: all 0.3s ease;
+  flex-shrink: 0;
+}
+
+.status-dot.connected {
   background: var(--success);
   box-shadow: 0 0 8px var(--success);
+  animation: none;
+}
+
+.status-dot.connecting {
+  background: #f59e0b;
+  box-shadow: 0 0 8px #f59e0b;
+  animation: pulseDot 1.4s infinite ease-in-out;
+}
+
+.status-dot.disconnected {
+  background: #ef4444;
+  box-shadow: 0 0 8px #ef4444;
+  animation: none;
+}
+
+@keyframes pulseDot {
+  0%, 100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(0.8);
+  }
 }
 
 .icon-btn {

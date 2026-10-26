@@ -496,14 +496,14 @@ export class UIManager {
     setTimeout(checkOrientation, 150);
   }
 
-  setCreateRoomLoading(loading) {
+  setCreateRoomLoading(loading, statusText = null) {
     if (!this.createRoomBtn) return;
     this.createRoomBtn.disabled = loading;
     if (loading) {
       if (!this.createRoomBtn.dataset.originalText) {
         this.createRoomBtn.dataset.originalText = this.createRoomBtn.textContent.trim();
       }
-      this.createRoomBtn.textContent = 'Creating Room...';
+      this.createRoomBtn.textContent = statusText || 'Creating Room...';
       this.createRoomBtn.classList.add('btn-loading');
     } else {
       this.createRoomBtn.textContent = this.createRoomBtn.dataset.originalText || 'Create Private Room';
@@ -511,14 +511,14 @@ export class UIManager {
     }
   }
 
-  setJoinRoomLoading(loading) {
+  setJoinRoomLoading(loading, statusText = null) {
     if (!this.joinRoomBtn) return;
     this.joinRoomBtn.disabled = loading;
     if (loading) {
       if (!this.joinRoomBtn.dataset.originalText) {
         this.joinRoomBtn.dataset.originalText = this.joinRoomBtn.textContent.trim();
       }
-      this.joinRoomBtn.textContent = 'Joining...';
+      this.joinRoomBtn.textContent = statusText || 'Joining...';
       this.joinRoomBtn.classList.add('btn-loading');
     } else {
       this.joinRoomBtn.textContent = this.joinRoomBtn.dataset.originalText || 'Join';
@@ -554,10 +554,31 @@ export class UIManager {
     }
   }
 
-  updatePing(ms) {
-    if (this.pingText) {
-      this.pingText.textContent = `${ms} ms`;
+  updateConnectionStatus(status, pingMs = null) {
+    const badge = document.getElementById('connection-badge');
+    const dot = badge ? badge.querySelector('.status-dot') : null;
+    if (!this.pingText) return;
+
+    if (status === 'connected') {
+      if (dot) {
+        dot.className = 'status-dot connected';
+      }
+      this.pingText.textContent = pingMs !== null ? `${pingMs} ms` : 'Online';
+    } else if (status === 'connecting' || status === 'waking') {
+      if (dot) {
+        dot.className = 'status-dot connecting';
+      }
+      this.pingText.textContent = status === 'waking' ? 'Waking...' : 'Connecting...';
+    } else if (status === 'disconnected') {
+      if (dot) {
+        dot.className = 'status-dot disconnected';
+      }
+      this.pingText.textContent = 'Disconnected';
     }
+  }
+
+  updatePing(ms) {
+    this.updateConnectionStatus('connected', ms);
   }
 
   updateLobby(roomState, myId) {
