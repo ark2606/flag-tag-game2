@@ -34,8 +34,9 @@ class GameApp {
     // High-DPI / Device Pixel Ratio scaling for crystal clear graphics on mobile & retina displays
     const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
     const rect = container.getBoundingClientRect();
+    const topBarHeight = parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--top-bar-height')) || 52;
     const cssWidth = Math.round(rect.width || window.innerWidth);
-    const cssHeight = Math.round(rect.height || (window.innerHeight - 40));
+    const cssHeight = Math.round(rect.height || (window.innerHeight - topBarHeight));
     if (cssWidth <= 0 || cssHeight <= 0) return;
 
     this.phaserGame.scale.setZoom(1 / dpr);
@@ -177,6 +178,12 @@ class GameApp {
         this.ui.updateSpeedDisplay(state.effectiveSpeed || state.baseSpeed, state.speedMultiplier);
       }
 
+      // Synchronize active player visual containers in ArenaScene
+      const scene = this.phaserGame?.scene?.getScene('ArenaScene');
+      if (scene && Array.isArray(state?.players) && typeof scene.syncActivePlayers === 'function') {
+        scene.syncActivePlayers(state.players.map((p) => p.id));
+      }
+
       if (state.status === ROOM_STATUS.LOBBY) {
         this.ui.showScreen('lobby');
         this.ui.updateLobby(state, this.myId);
@@ -184,6 +191,8 @@ class GameApp {
       } else if (state.status === ROOM_STATUS.PLAYING) {
         this.ui.showScreen('game');
         this.ui.lockSettings();
+      } else if (this.ui.currentScreen === 'lobby') {
+        this.ui.updateLobby(state, this.myId);
       }
     });
 
@@ -220,11 +229,34 @@ class GameApp {
 
     this.network.on(EVENTS.SERVER.PLAYER_LEFT, (data) => {
       this.ui.showToast(`${data.name || 'A player'} has left the room.`, 'warning');
+
+      // Immediately prune leaving player from local room state and DOM
+      if (this.currentRoomState?.players && data?.socketId) {
+        this.currentRoomState.players = this.currentRoomState.players.filter((p) => p.id !== data.socketId);
+      }
+      if ((data.leftAlone || data.remainingPlayers === 1) && this.currentRoomState) {
+        this.currentRoomState.hostId = this.myId;
+      }
+
+      // Remove leaving player visual from ArenaScene immediately
+      const scene = this.phaserGame?.scene?.getScene('ArenaScene');
+      if (scene && typeof scene.removePlayerVisual === 'function' && data?.socketId) {
+        scene.removePlayerVisual(data.socketId);
+      }
+
+      // Update lobby UI if currently on lobby screen
+      if (this.ui.currentScreen === 'lobby' && this.currentRoomState) {
+        this.ui.updateLobby(this.currentRoomState, this.myId);
+      }
+
       if (data.leftAlone || data.remainingPlayers === 1) {
         if (this.currentRoomState?.status === ROOM_STATUS.PLAYING || this.currentRoomState?.status === ROOM_STATUS.COUNTDOWN) {
           this.ui.showGameOverAlone('Everyone has left the room!');
         } else if (this.currentRoomState?.status === ROOM_STATUS.LOBBY) {
           this.ui.showToast('Everyone else has left the room. You are now alone.', 'error');
+          if (this.currentRoomState) {
+            this.ui.updateLobby(this.currentRoomState, this.myId);
+          }
         }
       }
     });
@@ -344,7 +376,39 @@ class GameApp {
       this.pendingStartOnLandscape = false;
       this.currentRoomState = null;
       this.network.leaveRoom();
+      const scene = this.phaserGame?.scene?.getScene('ArenaScene');
+      if (scene && typeof scene.clearAllPlayers === 'function') {
+        scene.clearAllPlayers();
+      }
       this.ui.showScreen('menu');
+    };
+
+    // Central flow for returning cleanly to the lobby without frozen screens or ghost players
+    const returnToLobbyFlow = () => {
+      this.pendingStartOnLandscape = false;
+      this.ui.hideGameOverAlone();
+      this.ui.hideExitConfirmModal();
+      this.network.returnToLobby();
+      this.ui.showScreen('lobby');
+      this.ui.unlockSettings();
+      this.ui.hidePhaseActive();
+
+      if (this.currentRoomState) {
+        if (this.currentRoomState.players?.length === 1) {
+          this.currentRoomState.hostId = this.myId;
+        }
+        this.ui.updateLobby(this.currentRoomState, this.myId);
+      }
+
+      const scene = this.phaserGame?.scene?.getScene('ArenaScene');
+      if (scene) {
+        if (typeof scene.clearAllRemotePlayers === 'function') {
+          scene.clearAllRemotePlayers();
+        }
+        if (this.currentRoomState?.players && typeof scene.syncActivePlayers === 'function') {
+          scene.syncActivePlayers(this.currentRoomState.players.map((p) => p.id));
+        }
+      }
     };
 
     // Leave Room button with confirmation
@@ -356,16 +420,32 @@ class GameApp {
 
     // In-game Exit button in top scorecard header
     this.ui.onExitRequest = () => {
-      this.ui.showExitConfirmModal(() => {
-        performLeaveRoom();
-      });
+      this.ui.showExitConfirmModal(
+        () => performLeaveRoom(),
+        () => {
+          const isGameActive = this.currentRoomState?.status === ROOM_STATUS.PLAYING && (this.currentRoomState?.players?.length || 0) > 1;
+          if (!isGameActive) {
+            returnToLobbyFlow();
+          }
+        }
+      );
     };
 
     // Handle Leave Room from Game Over Alone / Rotate overlay
     this.ui.onLeaveRoomRequest = () => {
-      this.ui.showExitConfirmModal(() => {
-        performLeaveRoom();
-      });
+      this.ui.showExitConfirmModal(
+        () => performLeaveRoom(),
+        () => {
+          returnToLobbyFlow();
+        }
+      );
+    };
+
+    this.ui.onExitCancel = () => {
+      const isGameActive = this.currentRoomState?.status === ROOM_STATUS.PLAYING && (this.currentRoomState?.players?.length || 0) > 1;
+      if (!isGameActive && (this.ui.currentScreen === 'game' || this.ui.gameOverAloneOverlay?.classList.contains('active'))) {
+        returnToLobbyFlow();
+      }
     };
 
     // Intercept accidental tab close or page reload (beforeunload)
@@ -383,19 +463,21 @@ class GameApp {
         try {
           window.history.pushState({ inGame: true }, '', window.location.href);
         } catch (_) {}
-        this.ui.showExitConfirmModal(() => {
-          performLeaveRoom();
-        });
+        this.ui.showExitConfirmModal(
+          () => performLeaveRoom(),
+          () => {
+            const isGameActive = this.currentRoomState?.status === ROOM_STATUS.PLAYING && (this.currentRoomState?.players?.length || 0) > 1;
+            if (!isGameActive) {
+              returnToLobbyFlow();
+            }
+          }
+        );
       }
     });
 
     // Handle Return to Lobby from Game Over Alone
     this.ui.onReturnToLobbyRequest = () => {
-      this.pendingStartOnLandscape = false;
-      this.network.returnToLobby();
-      this.ui.showScreen('lobby');
-      this.ui.unlockSettings();
-      this.ui.hidePhaseActive();
+      returnToLobbyFlow();
     };
 
     // Start Game (Host only) - only start if in landscape, otherwise block until landscape
@@ -429,12 +511,9 @@ class GameApp {
       this.network.rematch();
     });
 
-    // Return to Lobby (Host only)
+    // Return to Lobby from Results Screen
     this.ui.resultsLobbyBtn.addEventListener('click', () => {
-      this.network.returnToLobby();
-      this.ui.showScreen('lobby');
-      this.ui.unlockSettings();
-      this.ui.hidePhaseActive();
+      returnToLobbyFlow();
     });
   }
 }

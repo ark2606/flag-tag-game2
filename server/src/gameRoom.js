@@ -92,6 +92,15 @@ export class GameRoom {
       return { success: false, reason: 'Match is currently in progress.' };
     }
 
+    // If returning or joining a finished room, cleanly reset state to lobby
+    if (this.status === ROOM_STATUS.ENDED) {
+      this.stopSimulation();
+      this.resetMatchState();
+      this.status = ROOM_STATUS.LOBBY;
+    }
+
+    this.pruneDisconnectedPlayers();
+
     if (!rawName || typeof rawName !== 'string' || !rawName.trim()) {
       return { success: false, reason: 'A valid nickname is required.' };
     }
@@ -183,6 +192,10 @@ export class GameRoom {
       this.emitToRoom(EVENTS.SERVER.LEFT_ALONE, {
         message: 'Everyone has left the room!',
       });
+    } else if (this.players.size === 1 && this.status === ROOM_STATUS.ENDED) {
+      this.resetMatchState();
+      this.status = ROOM_STATUS.LOBBY;
+      this.broadcastRoomState();
     } else if (this.players.size < this.matchConfig.MIN_PLAYERS &&
        (this.status === ROOM_STATUS.PLAYING || this.status === ROOM_STATUS.COUNTDOWN)) {
       this.stopSimulation();
@@ -899,10 +912,28 @@ export class GameRoom {
   }
 
   /**
-   * Return to lobby request from host.
+   * Cleans up disconnected or invalid socket entries from the active room.
+   */
+  pruneDisconnectedPlayers() {
+    if (!this.io?.sockets?.sockets) return;
+    const staleIds = [];
+    for (const socketId of this.players.keys()) {
+      const s = this.io.sockets.sockets.get(socketId);
+      if (!s || !s.connected) {
+        staleIds.push(socketId);
+      }
+    }
+    for (const sid of staleIds) {
+      this.removePlayer(sid);
+    }
+  }
+
+  /**
+   * Return to lobby request from host or players after match.
    */
   handleReturnToLobby(socketId) {
-    if (socketId !== this.hostSocketId) {
+    this.pruneDisconnectedPlayers();
+    if (this.players.size > 1 && socketId !== this.hostSocketId && this.status !== ROOM_STATUS.ENDED) {
       return { success: false, reason: 'Only the host can return everyone to the lobby.' };
     }
     this.stopSimulation();

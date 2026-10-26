@@ -204,53 +204,41 @@ class SoundSynth {
     this.init();
     if (!this.ctx) return;
 
-    const t = this.ctx.currentTime;
+    if (this.ctx.state === 'suspended') {
+      this.ctx.resume();
+    }
 
-    // 1. Warm, mellow rounded hop tone (pure sine wave with acoustic lowpass filtering)
-    // Starts at a soft warm 150 Hz and gently rises to 250 Hz without high-pitch piercing
+    const t = this.ctx.currentTime;
+    const duration = 0.11; // 110ms soft, non-fatiguing duration
+
+    // Soft, light, playful electronic blip / gentle upward swoosh
+    // Pure sine oscillator: gentle rise from 240 Hz to 400 Hz without harsh frequencies or piercing highs
     const osc = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
     const filter = this.ctx.createBiquadFilter();
 
     osc.type = 'sine';
-    osc.frequency.setValueAtTime(150, t);
-    osc.frequency.exponentialRampToValueAtTime(250, t + 0.05);
-    osc.frequency.linearRampToValueAtTime(180, t + 0.10);
+    osc.frequency.setValueAtTime(240, t);
+    osc.frequency.exponentialRampToValueAtTime(400, t + 0.07);
+    osc.frequency.linearRampToValueAtTime(360, t + duration);
 
-    // Warm acoustic lowpass filter to remove any harsh harmonics or digital clicks
+    // Warm lowpass filter to remove any digital edge transients or pops
     filter.type = 'lowpass';
-    filter.frequency.setValueAtTime(650, t);
-    filter.frequency.linearRampToValueAtTime(350, t + 0.10);
+    filter.frequency.setValueAtTime(750, t);
+    filter.frequency.linearRampToValueAtTime(500, t + duration);
+    filter.Q.setValueAtTime(0.8, t);
 
-    // Smooth, non-fatiguing volume envelope (gentle attack, soft decay, low gain)
-    gain.gain.setValueAtTime(0.001, t);
-    gain.gain.linearRampToValueAtTime(0.09, t + 0.015);
-    gain.gain.exponentialRampToValueAtTime(0.001, t + 0.10);
+    // Subtle, gentle volume envelope: 12ms smooth attack, exponential decay (peak gain 0.045)
+    gain.gain.setValueAtTime(0.0001, t);
+    gain.gain.linearRampToValueAtTime(0.045, t + 0.012);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + duration);
 
     osc.connect(filter);
     filter.connect(gain);
     gain.connect(this.sfxGain || this.ctx.destination);
 
     osc.start(t);
-    osc.stop(t + 0.11);
-
-    // 2. Subtle physical takeoff thump (gives tactile weight to the jump without punchiness)
-    const subOsc = this.ctx.createOscillator();
-    const subGain = this.ctx.createGain();
-
-    subOsc.type = 'sine';
-    subOsc.frequency.setValueAtTime(120, t);
-    subOsc.frequency.exponentialRampToValueAtTime(65, t + 0.06);
-
-    subGain.gain.setValueAtTime(0.001, t);
-    subGain.gain.linearRampToValueAtTime(0.05, t + 0.01);
-    subGain.gain.exponentialRampToValueAtTime(0.001, t + 0.06);
-
-    subOsc.connect(subGain);
-    subGain.connect(this.sfxGain || this.ctx.destination);
-
-    subOsc.start(t);
-    subOsc.stop(t + 0.07);
+    osc.stop(t + duration);
   }
 
   playSpringBounce() {

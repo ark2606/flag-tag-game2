@@ -334,7 +334,13 @@ export class UIManager {
     // Exit confirmation modal buttons
     if (this.exitCancelBtn) {
       this.exitCancelBtn.addEventListener('click', () => {
+        const cancelCb = this.onExitCancelCallback;
         this.hideExitConfirmModal();
+        if (typeof cancelCb === 'function') {
+          cancelCb();
+        } else if (typeof this.onExitCancel === 'function') {
+          this.onExitCancel();
+        }
       });
     }
 
@@ -342,6 +348,7 @@ export class UIManager {
       this.exitConfirmBtn.addEventListener('click', () => {
         const cb = this.onExitConfirmCallback;
         this.hideExitConfirmModal();
+        this.hideGameOverAlone();
         if (typeof cb === 'function') cb();
       });
     }
@@ -349,7 +356,13 @@ export class UIManager {
     if (this.exitModalOverlay) {
       this.exitModalOverlay.addEventListener('click', (e) => {
         if (e.target === this.exitModalOverlay) {
+          const cancelCb = this.onExitCancelCallback;
           this.hideExitConfirmModal();
+          if (typeof cancelCb === 'function') {
+            cancelCb();
+          } else if (typeof this.onExitCancel === 'function') {
+            this.onExitCancel();
+          }
         }
       });
     }
@@ -376,8 +389,9 @@ export class UIManager {
     });
   }
 
-  showExitConfirmModal(onConfirm) {
+  showExitConfirmModal(onConfirm, onCancel = null) {
     this.onExitConfirmCallback = onConfirm;
+    this.onExitCancelCallback = onCancel;
     if (this.exitModalOverlay) {
       this.exitModalOverlay.classList.remove('hidden');
       this.exitModalOverlay.classList.add('active');
@@ -390,6 +404,7 @@ export class UIManager {
       this.exitModalOverlay.classList.remove('active');
     }
     this.onExitConfirmCallback = null;
+    this.onExitCancelCallback = null;
   }
 
   showLegalModal(tab = 'privacy') {
@@ -522,10 +537,10 @@ export class UIManager {
 
     if (this.aloneMenuBtn) {
       this.aloneMenuBtn.addEventListener('click', () => {
-        this.hideGameOverAlone();
         if (typeof this.onLeaveRoomRequest === 'function') {
           this.onLeaveRoomRequest();
         } else {
+          this.hideGameOverAlone();
           this.showScreen('menu');
         }
       });
@@ -671,10 +686,16 @@ export class UIManager {
     this.isCurrentHost = isHost;
 
     if (isHost) {
-      this.startGameBtn.classList.remove('hidden');
-      this.waitingNotice.classList.add('hidden');
-      this.startGameBtn.disabled = players.length < 2;
-      this.startGameBtn.title = players.length < 2 ? 'Need at least 2 players' : 'Start Match';
+      if (players.length < 2) {
+        this.startGameBtn.classList.add('hidden');
+        this.waitingNotice.classList.remove('hidden');
+        this.waitingNotice.textContent = 'Waiting for another player to join... Share your Room Code!';
+      } else {
+        this.startGameBtn.classList.remove('hidden');
+        this.startGameBtn.disabled = false;
+        this.startGameBtn.title = 'Start Match';
+        this.waitingNotice.classList.add('hidden');
+      }
 
       if (this.lobbySettingsTitle) {
         this.lobbySettingsTitle.innerHTML = 'MATCH SETTINGS <span class="badge-role-tag host-tag">Host Controls Settings</span>';
@@ -691,6 +712,7 @@ export class UIManager {
     } else {
       this.startGameBtn.classList.add('hidden');
       this.waitingNotice.classList.remove('hidden');
+      this.waitingNotice.textContent = 'Waiting for host to start...';
 
       if (this.lobbySettingsTitle) {
         this.lobbySettingsTitle.innerHTML = 'MATCH SETTINGS <span class="badge-role-tag guest-tag">Controlled by Host</span>';
@@ -708,7 +730,9 @@ export class UIManager {
 
     // Populate roster
     this.lobbyPlayerList.innerHTML = '';
-    players.forEach((p) => {
+    const activePlayers = (players || []).filter((p) => p && p.id);
+    this.playerCount.textContent = activePlayers.length;
+    activePlayers.forEach((p) => {
       const card = document.createElement('div');
       card.className = 'player-card';
 
@@ -817,10 +841,11 @@ export class UIManager {
     this.hudTimer.textContent = sec;
 
     if (sec <= 10) {
-      this.hudTimerCard.style.borderColor = '#ef4444';
+      this.hudTimerCard.classList.add('danger');
       this.hudTimer.style.color = '#ef4444';
     } else {
-      this.hudTimerCard.style.borderColor = 'rgba(255, 255, 255, 0.1)';
+      this.hudTimerCard.classList.remove('danger');
+      this.hudTimerCard.style.borderColor = 'rgba(255, 255, 255, 0.12)';
       this.hudTimer.style.color = '#ffffff';
     }
   }

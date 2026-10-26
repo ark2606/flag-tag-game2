@@ -38,6 +38,7 @@ export class ArenaScene extends Phaser.Scene {
     this.currentInputX = 0;
     this.currentJumpRequested = false;
     this.currentDropDown = false;
+    this.jumpSoundPlayedForCurrentPress = false;
     this.localSpringCooldown = 0;
     this.effectiveSpeed = 440;
     this.isMatchPlaying = false;
@@ -524,12 +525,25 @@ export class ArenaScene extends Phaser.Scene {
       this.effectiveSpeed = data.effectiveSpeed || data.baseSpeed || 440;
     });
 
-    // Room state listener (reset prediction when leaving/resetting match)
+    // Room state listener (reset prediction when leaving/resetting match & sync active roster)
     this.socketClient.on(EVENTS.SERVER.ROOM_STATE, (room) => {
       if (room.status !== 'playing') {
         this.isMatchPlaying = false;
         this.localPredictedPos = null;
         this.isFlagSurgeActive = false;
+      }
+      if (Array.isArray(room?.players)) {
+        this.syncActivePlayers(room.players.map((p) => p.id));
+      }
+      if (room.status === 'lobby') {
+        this.clearAllRemotePlayers();
+      }
+    });
+
+    // Player left listener (immediately destroy visual avatar of leaving player)
+    this.socketClient.on(EVENTS.SERVER.PLAYER_LEFT, (data) => {
+      if (data?.socketId) {
+        this.removePlayerVisual(data.socketId);
       }
     });
 
@@ -594,11 +608,9 @@ export class ArenaScene extends Phaser.Scene {
     });
 
     // Clean up disconnected players
-    for (const [id, visual] of this.playersMap.entries()) {
+    for (const [id] of this.playersMap.entries()) {
       if (!activeIds.has(id)) {
-        visual.container.destroy();
-        this.playersMap.delete(id);
-        this.serverPlayerStates.delete(id);
+        this.removePlayerVisual(id);
       }
     }
 
@@ -696,6 +708,43 @@ export class ArenaScene extends Phaser.Scene {
       nameText,
       scoreText,
     });
+  }
+
+  removePlayerVisual(socketId) {
+    const visual = this.playersMap.get(socketId);
+    if (visual) {
+      if (visual.container) {
+        visual.container.destroy();
+      }
+      this.playersMap.delete(socketId);
+    }
+    this.serverPlayerStates.delete(socketId);
+  }
+
+  syncActivePlayers(activeIds) {
+    const idSet = new Set(activeIds);
+    for (const [id] of this.playersMap.entries()) {
+      if (!idSet.has(id)) {
+        this.removePlayerVisual(id);
+      }
+    }
+  }
+
+  clearAllRemotePlayers() {
+    for (const [id] of this.playersMap.entries()) {
+      if (id !== this.myId) {
+        this.removePlayerVisual(id);
+      }
+    }
+  }
+
+  clearAllPlayers() {
+    for (const [id] of this.playersMap.entries()) {
+      this.removePlayerVisual(id);
+    }
+    this.localPredictedPos = null;
+    this.flagHolderId = null;
+    this.jumpSoundPlayedForCurrentPress = false;
   }
 
   onFlagTransferred(data) {
@@ -817,7 +866,10 @@ export class ArenaScene extends Phaser.Scene {
             if (this.currentJumpRequested && this.localPredictedPos.isGrounded) {
               this.localPredictedPos.vy = PHYSICS_CONFIG.JUMP_VELOCITY;
               this.localPredictedPos.isGrounded = false;
-              soundSynth.playJump();
+              if (!this.jumpSoundPlayedForCurrentPress) {
+                soundSynth.playJump();
+                this.jumpSoundPlayedForCurrentPress = true;
+              }
             }
 
             // 3. Gravitational acceleration
@@ -1126,6 +1178,9 @@ export class ArenaScene extends Phaser.Scene {
     this.currentInputX = ix;
     this.currentJumpRequested = jump;
     this.currentDropDown = dropDown;
+    if (!jump) {
+      this.jumpSoundPlayedForCurrentPress = false;
+    }
 
     // Send input to server at 60 Hz or immediately on state change
     this.inputSendTimer += dt;
